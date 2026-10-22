@@ -123,6 +123,10 @@
   .subsel { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 100%; min-width: 0; flex: 1 1 160px; }
   .settings { margin-bottom: 14px; }
   .settings .toggle { color: var(--fg); padding: 0; }
+  .dirrow { display: flex; align-items: center; gap: 6px; }
+  .dirrow .toggle { flex: 1; min-width: 0; }
+  .dirrow .mv { padding: 4px 10px; }
+  .dirrow .mv:disabled { opacity: .3; cursor: default; }
   .ver { font-size: .7rem; color: var(--muted); opacity: .7; text-align: center; padding: 24px 0 12px; }
   .toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; padding: 0 4px; }
   .toggle input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }

@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v20';
+  const APP_VERSION = 'v21';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -67,34 +67,67 @@
   });
 
   // Which top-level folders the main screen shows, by put.io folder id.
-  function rootPicks() {
-    try { return new Set(JSON.parse(store.get(KEY_ROOTDIRS) || '[]')); } catch (e) { return new Set(); }
+  // Ticked top-level folders, in the order the main screen shows them (put.io folder ids).
+  function rootOrder() {
+    try { const a = JSON.parse(store.get(KEY_ROOTDIRS) || '[]'); return Array.isArray(a) ? a.map(Number) : []; } catch (e) { return []; }
   }
+  function rootPicks() { return new Set(rootOrder()); }
+  function saveRootOrder(ids) {
+    store.set(KEY_ROOTDIRS, JSON.stringify(ids));
+    renderRootDirs();
+    if (stack.length === 1 && !playerOpen) loadFolder(0);
+  }
+  let rootDirs = [];
   async function loadRootDirs() {
     if (!token) return;
     try {
       const r = await api('/files/list', { params: { parent_id: 0, per_page: 1000 } });
-      const dirs = (r.files || []).filter((f) => f.file_type === 'FOLDER')
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-      const picked = rootPicks();
-      el.rootdirs.innerHTML = '';
-      if (!dirs.length) { el.rootdirs.innerHTML = '<span class="small muted">No folders found.</span>'; return; }
-      dirs.forEach((d) => {
-        const l = document.createElement('label'); l.className = 'toggle';
-        const c = document.createElement('input'); c.type = 'checkbox'; c.value = String(d.id); c.checked = picked.has(d.id);
-        l.append(c, ' ' + d.name);
-        el.rootdirs.appendChild(l);
-      });
+      rootDirs = (r.files || []).filter((f) => f.file_type === 'FOLDER');
+      renderRootDirs();
     } catch (e) {
       el.rootdirs.innerHTML = '';
       const s = document.createElement('span'); s.className = 'small err'; s.textContent = `Could not load folders (${e.message}).`;
       el.rootdirs.appendChild(s);
     }
   }
-  el.rootdirs.addEventListener('change', () => {
-    const ids = [...el.rootdirs.querySelectorAll('input:checked')].map((c) => Number(c.value));
-    store.set(KEY_ROOTDIRS, JSON.stringify(ids));
-    if (stack.length === 1 && !playerOpen) loadFolder(0);
+  // Ticked folders first in their chosen order (with up/down), then the rest A-Z.
+  function renderRootDirs() {
+    el.rootdirs.innerHTML = '';
+    if (!rootDirs.length) { el.rootdirs.innerHTML = '<span class="small muted">No folders found.</span>'; return; }
+    const order = rootOrder().filter((id) => rootDirs.some((d) => d.id === id));
+    const byId = new Map(rootDirs.map((d) => [d.id, d]));
+    const rest = rootDirs.filter((d) => !order.includes(d.id))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    [...order.map((id) => byId.get(id)), ...rest].forEach((d) => {
+      const pos = order.indexOf(d.id);
+      const row = document.createElement('div'); row.className = 'dirrow';
+      const l = document.createElement('label'); l.className = 'toggle';
+      const c = document.createElement('input'); c.type = 'checkbox'; c.value = String(d.id); c.checked = pos >= 0;
+      l.append(c, ' ' + d.name);
+      row.appendChild(l);
+      if (pos >= 0) {
+        [['up', '▲', pos === 0], ['down', '▼', pos === order.length - 1]].forEach(([dir, txt, off]) => {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost small mv';
+          b.textContent = txt; b.dataset.move = dir; b.dataset.id = String(d.id); b.disabled = off;
+          b.setAttribute('aria-label', `Move ${d.name} ${dir}`);
+          row.appendChild(b);
+        });
+      }
+      el.rootdirs.appendChild(row);
+    });
+  }
+  el.rootdirs.addEventListener('change', (e) => {
+    const id = Number(e.target.value); if (!id) return;
+    const order = rootOrder().filter((x) => x !== id);
+    if (e.target.checked) order.push(id); // newly ticked goes last
+    saveRootOrder(order);
+  });
+  el.rootdirs.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-move]'); if (!b) return;
+    const order = rootOrder(), id = Number(b.dataset.id), i = order.indexOf(id), j = b.dataset.move === 'up' ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    saveRootOrder(order);
   });
   let pending = {};
   try { pending = JSON.parse(store.get(KEY_PENDING) || '{}') || {}; } catch (e) { pending = {}; }
@@ -217,7 +250,10 @@
       });
       // Main screen only: keep just the folders ticked in Settings (none ticked = show all).
       const picked = rootPicks();
-      if (id === 0 && picked.size) files = files.filter((f) => picked.has(f.id));
+      if (id === 0 && picked.size) {
+        const order = rootOrder();
+        files = files.filter((f) => picked.has(f.id)).sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      }
       renderList();
       loadFolderInfo();
     } catch (e) {
