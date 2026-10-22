@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v8';
+  const APP_VERSION = 'v9';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -16,7 +16,7 @@
     browser: $('#browser'), crumbs: $('#crumbs'), list: $('#list'),
     player: $('#player'), video: $('#video'), ptitle: $('#ptitle'),
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
-    autoplay: $('#autoplay'),
+    autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
   };
 
@@ -28,9 +28,14 @@
 
   let token = store.get(KEY_TOKEN);
   if ($('#ver')) $('#ver').textContent = APP_VERSION;
-  // Auto-start playback when a file opens. On unless switched off; remembered per device.
-  el.autoplay.checked = store.get(KEY_AUTOPLAY) !== 'off';
+  // Settings (cog). Auto-start applies to every file; off unless switched on; remembered per device.
+  el.autoplay.checked = store.get(KEY_AUTOPLAY) === 'on';
   el.autoplay.addEventListener('change', () => store.set(KEY_AUTOPLAY, el.autoplay.checked ? 'on' : 'off'));
+  function toggleSettings(open) {
+    el.settings.hidden = !open;
+    el.cog.setAttribute('aria-expanded', String(open));
+  }
+  el.cog.addEventListener('click', () => toggleSettings(el.settings.hidden));
   let pending = {};
   try { pending = JSON.parse(store.get(KEY_PENDING) || '{}') || {}; } catch (e) { pending = {}; }
 
@@ -66,6 +71,8 @@
     el.browser.hidden = view !== 'browser';
     el.player.hidden = view !== 'player';
     el.signout.hidden = view === 'login';
+    el.cog.hidden = view === 'login';
+    if (view === 'login') toggleSettings(false);
     el.back.hidden = view !== 'player' && stack.length < 2;
   }
 

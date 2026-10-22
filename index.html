@@ -110,6 +110,8 @@
   .ptitle { font-size: 1.05rem; font-weight: 650; margin: 14px 0 4px; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .subsel { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 100%; min-width: 0; flex: 1 1 160px; }
+  .settings { margin-bottom: 14px; }
+  .settings .toggle { color: var(--fg); padding: 0; }
   .ver { font-size: .7rem; color: var(--muted); opacity: .7; text-align: center; padding: 24px 0 12px; }
   .toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; padding: 0 4px; }
   .toggle input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
@@ -123,8 +125,13 @@
   <header>
     <button id="back" class="ghost" hidden aria-label="Back">&larr; Back</button>
     <h1 id="title"></h1>
+    <button id="cog" class="ghost" hidden aria-label="Settings" aria-expanded="false" aria-controls="settings" title="Settings">&#9881;</button>
     <button id="signout" class="ghost small" hidden>Sign out</button>
   </header>
+  <section id="settings" class="card stack settings" hidden aria-label="Settings">
+    <strong>Settings</strong>
+    <label class="toggle"><input type="checkbox" id="autoplay"> Auto-start playback when a file opens</label>
+  </section>
 
   <main>
     <section id="login" class="card stack" hidden>
@@ -160,7 +167,6 @@
         <a id="download" class="btn" href="#" rel="noopener">Download</a>
         <button id="vlc" hidden>Open in VLC</button>
         <button id="mp4" hidden>Switch format</button>
-        <label class="toggle small"><input type="checkbox" id="autoplay"> Auto-start</label>
       </div>
       <div id="subs" class="actions" hidden>
         <label for="subsel" class="small muted" style="align-self:center">Subtitles</label>
