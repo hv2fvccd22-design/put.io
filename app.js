@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v23';
+  const APP_VERSION = 'v24';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -9,6 +9,7 @@
   const KEY_BUFFER = 'resume.buffer';
   const KEY_ROOTDIRS = 'resume.rootdirs';
   const KEY_HIDENP = 'resume.hidenp';
+  const KEY_PLAYNEXT = 'resume.playnext';
   const KEY_OMDB = 'resume.omdbkey';
   const KEY_OMDB_CACHE = 'resume.omdbcache';
   const BUFFER_AHEAD_SECS = 300;
@@ -24,7 +25,7 @@
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
-    rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), omdbkey: $('#omdbkey'),
+    rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
@@ -49,6 +50,9 @@
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
   }
+  // Play next: on unless switched off.
+  el.playnext.checked = store.get(KEY_PLAYNEXT) !== 'off';
+  el.playnext.addEventListener('change', () => store.set(KEY_PLAYNEXT, el.playnext.checked ? 'on' : 'off'));
   // Hide non-playable files in lists: on unless switched off.
   el.hidenp.checked = store.get(KEY_HIDENP) !== 'off';
   el.hidenp.addEventListener('change', () => {
@@ -476,13 +480,25 @@
   }
 
   /* ---------- player ---------- */
-  async function openFile(f) {
+  // The next playable file after the current one, in the folder's list order.
+  function nextFile() {
+    const i = current ? files.indexOf(current) : -1;
+    if (i < 0) return null;
+    return files.slice(i + 1).find(isPlayable) || null;
+  }
+
+  let forcePlay = false; // playing on from the previous file: start even if Auto-start is off
+  async function openFile(f, opts = {}) {
     current = f;
     lastSaveAt = 0; lastSavedSecs = -1;
+    forcePlay = !!opts.next;
+    // Moving on to the next file replaces the player entry, so Back still goes to the folder.
+    if (playerOpen) history.replaceState({ d: stack.length, p: 1 }, '');
+    else history.pushState({ d: stack.length, p: 1 }, '');
     playerOpen = true;
-    history.pushState({ d: stack.length, p: 1 }, '');
     show('player');
     setTitle('');
+    el.next.hidden = !nextFile();
     el.ptitle.textContent = f.name;
     el.mp4.hidden = true;
     destroyHls();
@@ -631,7 +647,7 @@
     }
     el.mp4.hidden = true; // format switch button turned off; nextKind() still falls back on errors
     el.mp4.textContent = `Format: ${KIND_LABEL[kind]}. Switch`;
-    if (el.autoplay.checked || wasPlaying) {
+    if (el.autoplay.checked || wasPlaying || forcePlay) {
       setStatus(`${note ? note + '. ' : ''}Playing ${KIND_LABEL[kind]}`);
       v.play().catch(() => { /* needs a tap */ });
     } else {
@@ -774,7 +790,14 @@
     try { await position.reset(id, false); } catch (e) { /* leave saved position */ }
     delete pending[id]; savePending();
     current.start_from = 0; lastSavedSecs = -1;
+    const n = el.playnext.checked ? nextFile() : null;
+    if (n && current.id === id) { openFile(n, { next: true }); return; }
     setStatus('Finished. Position cleared.');
+  });
+  el.next.addEventListener('click', async () => {
+    const n = nextFile(); if (!n) return;
+    await saveNow(false);
+    openFile(n, { next: true });
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(true); });
   window.addEventListener('pagehide', () => saveNow(true));
