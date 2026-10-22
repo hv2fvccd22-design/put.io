@@ -1,13 +1,15 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v12';
+  const APP_VERSION = 'v13';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
   const KEY_AUTOPLAY = 'resume.autoplay';
   const KEY_BUFFER = 'resume.buffer';
   const KEY_ROOTDIRS = 'resume.rootdirs';
+  const KEY_OMDB = 'resume.omdbkey';
+  const KEY_OMDB_CACHE = 'resume.omdbcache';
   const BUFFER_AHEAD_SECS = 300;
   const SAVE_EVERY_MS = 10000;
   const MIN_SAVE_SECONDS = 5;
@@ -21,7 +23,8 @@
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
-    rootdirs: $('#rootdirs'), imdb: $('#imdb'),
+    rootdirs: $('#rootdirs'), imdb: $('#imdb'), omdbkey: $('#omdbkey'),
+    info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
   };
 
@@ -44,6 +47,11 @@
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
   }
+  el.omdbkey.value = store.get(KEY_OMDB) || '';
+  el.omdbkey.addEventListener('change', () => {
+    const k = el.omdbkey.value.trim();
+    if (k) store.set(KEY_OMDB, k); else store.del(KEY_OMDB);
+  });
   el.cog.addEventListener('click', () => {
     const open = el.settings.hidden;
     toggleSettings(open);
@@ -274,6 +282,72 @@
     if (year) s = s.slice(0, year.index) + year[0].replace(/[()]/g, '');
     return s.replace(/\s+/g, ' ').replace(/[\s-]+$/, '').trim();
   }
+  // Split a release name into show/film title, year, season and episode.
+  function parseRelease(name) {
+    const s = name.replace(/[._]+/g, ' ');
+    const ep = /\bS(\d{1,2})E(\d{1,3})\b/i.exec(s) || /\b(\d{1,2})x(\d{2})\b/.exec(s);
+    const year = /\b((?:19|20)\d{2})\b/.exec(s);
+    return {
+      title: cleanTitle(name).replace(/\s(19|20)\d{2}$/, ''),
+      year: year ? year[1] : '',
+      season: ep ? Number(ep[1]) : null,
+      episode: ep ? Number(ep[2]) : null,
+    };
+  }
+
+  // OMDb lookups (only with a key set in Settings), remembered on this device.
+  function omdbCache() { try { return JSON.parse(store.get(KEY_OMDB_CACHE) || '{}') || {}; } catch (e) { return {}; } }
+  async function omdb(params) {
+    const key = store.get(KEY_OMDB); if (!key) return null;
+    const id = JSON.stringify(params), cache = omdbCache();
+    if (cache[id]) return cache[id].r;
+    const u = new URL('https://www.omdbapi.com/');
+    u.searchParams.set('apikey', key);
+    for (const [k, v] of Object.entries(params)) if (v !== '' && v != null) u.searchParams.set(k, v);
+    const res = await fetch(u);
+    if (res.status === 401) throw new Error('OMDb key rejected');
+    const r = await res.json();
+    if (r.Response === 'False' && /key/i.test(r.Error || '')) throw new Error(r.Error);
+    const ok = r.Response === 'True' ? r : null;
+    cache[id] = { r: ok, t: Date.now() };
+    const keys = Object.keys(cache);
+    if (keys.length > 400) keys.sort((a, b) => cache[a].t - cache[b].t).slice(0, keys.length - 400).forEach((k) => delete cache[k]);
+    store.set(KEY_OMDB_CACHE, JSON.stringify(cache));
+    return ok;
+  }
+  function showFolderTitle() {
+    for (let i = stack.length - 1; i > 0; i--) if (!/^season\b/i.test(stack[i].name)) return stack[i].name;
+    return '';
+  }
+  async function loadInfo(f) {
+    el.info.hidden = true; el.poster.hidden = true; el.poster.removeAttribute('src');
+    if (!store.get(KEY_OMDB) || f.file_type !== 'VIDEO') return;
+    let p = parseRelease(f.name);
+    if (p.title.length < 3) { const q = parseRelease(showFolderTitle()); p = { ...q, season: p.season, episode: p.episode }; }
+    if (!p.title) return;
+    try {
+      const isEp = p.season != null;
+      const main = await omdb({ t: p.title, y: p.year, type: isEp ? 'series' : 'movie' }) || await omdb({ t: p.title, y: p.year });
+      if (!current || current.id !== f.id || !main) return;
+      const ep = isEp ? await omdb({ i: main.imdbID, Season: p.season, Episode: p.episode }) : null;
+      if (!current || current.id !== f.id) return;
+      const na = (v) => (v && v !== 'N/A' ? v : '');
+      const src = ep || main;
+      el.infoTitle.textContent = ep ? `${main.Title}: S${p.season}E${p.episode} ${na(ep.Title)}` : `${main.Title} (${na(main.Year)})`;
+      el.infoMeta.innerHTML = '';
+      const rating = na(src.imdbRating) || na(main.imdbRating);
+      if (rating) { const st = document.createElement('span'); st.className = 'star'; st.textContent = `★ ${rating}`; el.infoMeta.append(st, ' · '); }
+      el.infoMeta.append([na(src.Runtime), na(main.Genre)].filter(Boolean).join(' · '));
+      el.infoPlot.textContent = na(src.Plot) || na(main.Plot);
+      const poster = na(src.Poster) || na(main.Poster);
+      if (poster && poster.startsWith('https://m.media-amazon.com/')) { el.poster.src = poster; el.poster.hidden = false; }
+      el.imdb.href = `https://www.imdb.com/title/${encodeURIComponent(src.imdbID || main.imdbID)}/`;
+      el.info.hidden = false;
+    } catch (e) {
+      setStatus(`IMDb info unavailable (${e.message}).`, 'warn');
+    }
+  }
+
   function imdbSearchUrl(f) {
     let q = cleanTitle(f.name);
     // Episode files named only "E03" or "Episode 3": use the show folder above instead.
@@ -311,6 +385,7 @@
       f.direct = r.url;
       el.download.href = dlUrl(f);
       el.imdb.href = imdbSearchUrl(f);
+      loadInfo(f);
       el.vlc.hidden = !/Android/i.test(navigator.userAgent);
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Resume for put.io</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https:; media-src https: blob:; worker-src 'self' blob:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://m.media-amazon.com; connect-src https:; media-src https: blob:; worker-src 'self' blob:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <script src="hls.min.js"></script>
 <meta name="theme-color" content="#0f1416">
@@ -110,6 +110,12 @@
   .bufbar { position: relative; height: 8px; margin-top: 8px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
   .bufbar .ranges > div { position: absolute; top: 0; bottom: 0; background: #fdce45; }
   .bufbar .played { position: absolute; top: 0; bottom: 0; left: 0; background: var(--fg); border-right: 2px solid var(--bg); }
+  .info { display: flex; gap: 12px; margin: 8px 0 4px; align-items: flex-start; }
+  .info img { width: 80px; flex: none; border-radius: 6px; background: var(--surface-2); }
+  .info-text { min-width: 0; }
+  .info-title { font-weight: 650; }
+  .info p { margin: 6px 0 0; }
+  .info .star { color: #fdce45; }
   .ptitle { font-size: 1.05rem; font-weight: 650; margin: 14px 0 4px; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .subsel { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 100%; min-width: 0; flex: 1 1 160px; }
@@ -136,6 +142,11 @@
     <label class="toggle"><input type="checkbox" id="autoplay"> Auto-start playback when a file opens</label>
     <label class="toggle"><input type="checkbox" id="bufahead"> Buffer ahead (up to 5 min) for patchy signal</label>
     <p class="small muted" style="margin:0">Buffer ahead plays videos through the put.io stream so it can keep downloading ahead. Takes effect on the next file you open.</p>
+    <div class="stack" style="gap:8px">
+      <label for="omdbkey" class="small"><strong>OMDb API key</strong> <span class="muted">(for IMDb ratings, posters and plots)</span></label>
+      <input id="omdbkey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key">
+      <p class="small muted" style="margin:0">Stored only in this browser on this device. Leave empty to turn it off.</p>
+    </div>
     <div class="stack" style="gap:8px">
       <strong class="small">Folders on the main screen</strong>
       <div id="rootdirs" class="stack" style="gap:6px"><span class="small muted">Loading&hellip;</span></div>
@@ -173,6 +184,14 @@
       <video id="video" controls playsinline preload="metadata"></video>
       <div id="bufbar" class="bufbar" hidden aria-hidden="true"><div class="ranges"></div><div class="played"></div></div>
       <div id="ptitle" class="ptitle"></div>
+      <div id="info" class="info" hidden>
+        <img id="poster" alt="" hidden>
+        <div class="info-text">
+          <div id="info-title" class="info-title"></div>
+          <div id="info-meta" class="small muted"></div>
+          <p id="info-plot" class="small"></p>
+        </div>
+      </div>
       <div class="actions">
         <button id="restart">Start over</button>
         <a id="download" class="btn" href="#" rel="noopener">Download</a>
