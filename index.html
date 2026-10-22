@@ -87,7 +87,7 @@
 
   .list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
   .row {
-    display: grid; grid-template-columns: 34px minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+    display: grid; grid-template-columns: 34px minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px;
     padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line);
     background: none; border-radius: 0; text-align: left; width: 100%;
   }
@@ -101,11 +101,16 @@
   .dl { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: -6px -8px -6px 0; border: 1px solid var(--line); border-radius: 8px; color: var(--accent); font-size: 1.1rem; }
   .dl:hover { border-color: var(--accent); }
   .dl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .del { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: -6px -8px -6px 0; border: 1px solid var(--line); border-radius: 8px; color: var(--bad); font-size: 1rem; }
+  .del:hover { border-color: var(--bad); }
+  .del:focus-visible { outline: 2px solid var(--bad); outline-offset: 2px; }
   .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
 
   video { width: 100%; max-height: 62vh; background: #000; border-radius: 10px; display: block; }
   .ptitle { font-size: 1.05rem; font-weight: 650; margin: 14px 0 4px; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; padding: 0 4px; }
+  .toggle input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
   .status { margin-top: 12px; font-size: .875rem; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
   .status.bad { color: var(--bad); }
   .status.warn { color: var(--warn); }
@@ -153,6 +158,7 @@
         <a id="download" class="btn" href="#" rel="noopener">Download</a>
         <button id="vlc" hidden>Open in VLC</button>
         <button id="mp4" hidden>Switch format</button>
+        <label class="toggle small"><input type="checkbox" id="autoplay"> Auto-start</label>
       </div>
       <div id="status" class="status" role="status"></div>
     </section>

@@ -4,6 +4,7 @@
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
+  const KEY_AUTOPLAY = 'resume.autoplay';
   const SAVE_EVERY_MS = 10000;
   const MIN_SAVE_SECONDS = 5;
 
@@ -14,6 +15,7 @@
     browser: $('#browser'), crumbs: $('#crumbs'), list: $('#list'),
     player: $('#player'), video: $('#video'), ptitle: $('#ptitle'),
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
+    autoplay: $('#autoplay'),
   };
 
   const store = {
@@ -23,6 +25,9 @@
   };
 
   let token = store.get(KEY_TOKEN);
+  // Auto-start playback when a file opens. On unless switched off; remembered per device.
+  el.autoplay.checked = store.get(KEY_AUTOPLAY) !== 'off';
+  el.autoplay.addEventListener('change', () => store.set(KEY_AUTOPLAY, el.autoplay.checked ? 'on' : 'off'));
   let pending = {};
   try { pending = JSON.parse(store.get(KEY_PENDING) || '{}') || {}; } catch (e) { pending = {}; }
 
@@ -184,7 +189,11 @@
         d.className = 'dl'; d.setAttribute('role', 'button'); d.tabIndex = 0;
         d.setAttribute('aria-label', 'Download ' + f.name); d.title = 'Download original file';
         d.textContent = '↓';
-        row.appendChild(d);
+        const x = document.createElement('span');
+        x.className = 'del'; x.setAttribute('role', 'button'); x.tabIndex = 0;
+        x.setAttribute('aria-label', 'Delete ' + f.name); x.title = 'Delete from put.io';
+        x.textContent = '✕';
+        row.append(d, x);
       }
       el.list.appendChild(row);
     });
@@ -208,6 +217,7 @@
     el.ptitle.textContent = f.name;
     el.mp4.hidden = true;
     destroyHls();
+    clearSubtitles();
     setStatus('Loading…');
 
     let start = pending[f.id] != null ? pending[f.id] : (f.start_from || 0);
@@ -235,6 +245,46 @@
     // Audio always tries the original file first; put.io's MP4 conversion is video-only.
     kinds = (native || f.file_type === 'AUDIO') ? ['direct', ...mp4, 'hls'] : [...mp4, 'hls', 'direct'];
     playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)}` : 'Ready');
+    if (f.file_type === 'VIDEO') loadSubtitles(f);
+  }
+
+  /* ---------- subtitles ---------- */
+  // put.io lists subtitles per file and serves them as WebVTT. They're fetched here
+  // and attached as blob: tracks, so the video's own CC menu can turn them on.
+  let subUrls = [];
+  function clearSubtitles() {
+    el.video.querySelectorAll('track').forEach((t) => t.remove());
+    subUrls.forEach((u) => URL.revokeObjectURL(u)); subUrls = [];
+  }
+  async function fetchText(url) {
+    let res = await fetch(url);
+    if (res.status === 401 || res.status === 403) {
+      const u = new URL(url); u.searchParams.delete('oauth_token');
+      res = await fetch(u, { headers: { Authorization: 'token ' + token } });
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.text();
+  }
+  async function loadSubtitles(f) {
+    clearSubtitles();
+    let list = [];
+    try { list = ((await api(`/files/${f.id}/subtitles`)) || {}).subtitles || []; } catch (e) { return; }
+    for (const s of list) {
+      if (!current || current.id !== f.id) return; // moved on to another file
+      try {
+        const u = new URL(`${API}/files/${f.id}/subtitles/${encodeURIComponent(s.key)}`);
+        u.searchParams.set('format', 'webvtt');
+        u.searchParams.set('oauth_token', token);
+        const vtt = await fetchText(u.toString());
+        const blobUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+        subUrls.push(blobUrl);
+        const t = document.createElement('track');
+        t.kind = 'subtitles'; t.src = blobUrl;
+        t.label = s.name || s.language || 'Subtitles';
+        if (s.language_code && /^[a-z]{2,3}$/i.test(s.language_code)) t.srclang = s.language_code;
+        el.video.appendChild(t);
+      } catch (e) { /* skip this track */ }
+    }
   }
 
   /* ---------- formats: direct file, put.io MP4 conversion, or HLS stream ---------- */
@@ -250,8 +300,10 @@
   function playKind(i, note) {
     if (!current) return;
     kindIdx = i; const kind = kinds[i];
-    destroyHls();
     const v = el.video, src = srcFor(kind);
+    // Keep playing across a format switch even when auto-start is off.
+    const wasPlaying = !v.paused && !v.ended;
+    destroyHls();
     if (kind === 'hls' && !v.canPlayType('application/vnd.apple.mpegurl')) {
       if (window.Hls && window.Hls.isSupported()) {
         hls = new window.Hls();
@@ -264,8 +316,12 @@
     }
     el.mp4.hidden = kinds.length < 2;
     el.mp4.textContent = `Format: ${KIND_LABEL[kind]}. Switch`;
-    setStatus(`${note ? note + '. ' : ''}Playing ${KIND_LABEL[kind]}`);
-    v.play().catch(() => { /* needs a tap */ });
+    if (el.autoplay.checked || wasPlaying) {
+      setStatus(`${note ? note + '. ' : ''}Playing ${KIND_LABEL[kind]}`);
+      v.play().catch(() => { /* needs a tap */ });
+    } else {
+      setStatus(`${note ? note + '. ' : ''}Ready: ${KIND_LABEL[kind]}. Press play to start`);
+    }
   }
   function nextKind(why) {
     if (kindIdx + 1 < kinds.length) {
@@ -347,7 +403,7 @@
   async function closePlayer() {
     if (!playerOpen) return;
     await saveNow(false);
-    el.video.pause(); destroyHls();
+    el.video.pause(); destroyHls(); clearSubtitles();
     el.video.removeAttribute('src'); el.video.load();
     const f = files.find((x) => current && x.id === current.id);
     if (f && current) f.start_from = current.start_from;
@@ -361,16 +417,30 @@
     a.href = dlUrl(f); a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
   }
+  async function deleteFile(f) {
+    if (!confirm(`Delete "${f.name}" from put.io?`)) return;
+    try {
+      await api('/files/delete', { method: 'POST', params: { file_ids: String(f.id) } });
+      delete pending[f.id]; savePending();
+      files = files.filter((x) => x.id !== f.id);
+      renderList();
+    } catch (e) {
+      if (e.auth) return logout('Your token was rejected. Connect again.');
+      alert(`Could not delete "${f.name}" (${e.message}).`);
+    }
+  }
   el.list.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('dl')) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && (e.target.classList.contains('dl') || e.target.classList.contains('del'))) {
       e.preventDefault(); e.stopPropagation();
-      const f = files[Number(e.target.closest('.row').dataset.index)]; if (f) startDownload(f);
+      const f = files[Number(e.target.closest('.row').dataset.index)]; if (!f) return;
+      if (e.target.classList.contains('del')) deleteFile(f); else startDownload(f);
     }
   });
   el.list.addEventListener('click', (e) => {
     const row = e.target.closest('.row'); if (!row) return;
     const f = files[Number(row.dataset.index)]; if (!f) return;
     if (e.target.closest('.dl')) { e.stopPropagation(); startDownload(f); return; }
+    if (e.target.closest('.del')) { e.stopPropagation(); deleteFile(f); return; }
     if (f.file_type === 'FOLDER') enterFolder(f);
     else if (isPlayable(f)) openFile(f);
     else api(`/files/${f.id}/url`).then((r) => { window.open(r.url, '_blank', 'noopener'); }).catch(() => {});
