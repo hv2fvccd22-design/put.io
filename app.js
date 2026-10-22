@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v17';
+  const APP_VERSION = 'v18';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -16,7 +16,7 @@
 
   const $ = (s) => document.querySelector(s);
   const el = {
-    title: $('#title'), back: $('#back'), signout: $('#signout'),
+    title: $('#title'), logo: $('#logo'), back: $('#back'), signout: $('#signout'),
     login: $('#login'), loginForm: $('#login-form'), tokenInput: $('#token-input'), loginMsg: $('#login-msg'),
     browser: $('#browser'), crumbs: $('#crumbs'), list: $('#list'),
     player: $('#player'), video: $('#video'), ptitle: $('#ptitle'),
@@ -119,6 +119,11 @@
   const isPlayable = (f) => f.file_type === 'VIDEO' || f.file_type === 'AUDIO';
   function savePending() { store.set(KEY_PENDING, JSON.stringify(pending)); }
   function setStatus(msg, cls) { el.status.textContent = msg; el.status.className = 'status' + (cls ? ' ' + cls : ''); }
+  // Header: a folder name inside folders; the app icon on the main screen and in the player.
+  function setTitle(text) {
+    el.title.textContent = text;
+    el.logo.hidden = !!text;
+  }
   function show(view) {
     el.login.hidden = view !== 'login';
     el.browser.hidden = view !== 'browser';
@@ -228,7 +233,7 @@
         el.crumbs.appendChild(b);
       }
     });
-    el.title.textContent = stack.length > 1 ? stack[stack.length - 1].name : '';
+    setTitle(stack.length > 1 ? stack[stack.length - 1].name : '');
     el.back.hidden = stack.length < 2;
   }
 
@@ -427,7 +432,7 @@
     playerOpen = true;
     history.pushState({ d: stack.length, p: 1 }, '');
     show('player');
-    el.title.textContent = 'Now playing';
+    setTitle('');
     el.ptitle.textContent = f.name;
     el.mp4.hidden = true;
     destroyHls();
@@ -758,7 +763,7 @@
     token = null; store.del(KEY_TOKEN);
     if (playerOpen) { el.video.pause(); el.video.removeAttribute('src'); el.video.load(); playerOpen = false; current = null; }
     stack = [{ id: 0, name: 'Files' }];
-    el.title.textContent = '';
+    setTitle('');
     el.loginMsg.textContent = msg || '';
     show('login');
   }
