@@ -1,6 +1,6 @@
 {
-  "name": "Resume for put.io",
-  "short_name": "Resume",
+  "name": "put.io",
+  "short_name": "put.io",
   "description": "Play your put.io files and keep your place across devices.",
   "start_url": "./",
   "scope": "./",

@@ -1,5 +1,5 @@
 // App-shell cache only. API calls and video streams are never touched.
-const CACHE = 'resume-shell-v13';
+const CACHE = 'resume-shell-v14';
 const SHELL = ['./', 'index.html', 'app.js', 'hls.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
