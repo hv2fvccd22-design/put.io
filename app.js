@@ -1,12 +1,13 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v11';
+  const APP_VERSION = 'v12';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
   const KEY_AUTOPLAY = 'resume.autoplay';
   const KEY_BUFFER = 'resume.buffer';
+  const KEY_ROOTDIRS = 'resume.rootdirs';
   const BUFFER_AHEAD_SECS = 300;
   const SAVE_EVERY_MS = 10000;
   const MIN_SAVE_SECONDS = 5;
@@ -20,6 +21,7 @@
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
+    rootdirs: $('#rootdirs'), imdb: $('#imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
   };
 
@@ -42,7 +44,42 @@
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
   }
-  el.cog.addEventListener('click', () => toggleSettings(el.settings.hidden));
+  el.cog.addEventListener('click', () => {
+    const open = el.settings.hidden;
+    toggleSettings(open);
+    if (open) loadRootDirs();
+  });
+
+  // Which top-level folders the main screen shows, by put.io folder id.
+  function rootPicks() {
+    try { return new Set(JSON.parse(store.get(KEY_ROOTDIRS) || '[]')); } catch (e) { return new Set(); }
+  }
+  async function loadRootDirs() {
+    if (!token) return;
+    try {
+      const r = await api('/files/list', { params: { parent_id: 0, per_page: 1000 } });
+      const dirs = (r.files || []).filter((f) => f.file_type === 'FOLDER')
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+      const picked = rootPicks();
+      el.rootdirs.innerHTML = '';
+      if (!dirs.length) { el.rootdirs.innerHTML = '<span class="small muted">No folders found.</span>'; return; }
+      dirs.forEach((d) => {
+        const l = document.createElement('label'); l.className = 'toggle';
+        const c = document.createElement('input'); c.type = 'checkbox'; c.value = String(d.id); c.checked = picked.has(d.id);
+        l.append(c, ' ' + d.name);
+        el.rootdirs.appendChild(l);
+      });
+    } catch (e) {
+      el.rootdirs.innerHTML = '';
+      const s = document.createElement('span'); s.className = 'small err'; s.textContent = `Could not load folders (${e.message}).`;
+      el.rootdirs.appendChild(s);
+    }
+  }
+  el.rootdirs.addEventListener('change', () => {
+    const ids = [...el.rootdirs.querySelectorAll('input:checked')].map((c) => Number(c.value));
+    store.set(KEY_ROOTDIRS, JSON.stringify(ids));
+    if (stack.length === 1 && !playerOpen) loadFolder(0);
+  });
   let pending = {};
   try { pending = JSON.parse(store.get(KEY_PENDING) || '{}') || {}; } catch (e) { pending = {}; }
 
@@ -157,6 +194,9 @@
         const fa = a.file_type === 'FOLDER' ? 0 : 1, fb = b.file_type === 'FOLDER' ? 0 : 1;
         return fa - fb || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
       });
+      // Main screen only: keep just the folders ticked in Settings (none ticked = show all).
+      const picked = rootPicks();
+      if (id === 0 && picked.size) files = files.filter((f) => picked.has(f.id));
       renderList();
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
@@ -223,6 +263,26 @@
     renderCrumbs();
   }
 
+  /* ---------- IMDb ---------- */
+  // Turn a release name into a search: "Mayor.of.Kingstown.S01E03.720p..." -> "Mayor of Kingstown".
+  // Keeps a year for films ("Some.Film.2019.1080p" -> "Some Film 2019").
+  function cleanTitle(name) {
+    let s = name.replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[._]+/g, ' ').replace(/\[[^\]]*\]/g, ' ');
+    const cut = /\b(S\d{1,2}(E\d{1,3})?|\d{1,2}x\d{2}|2160p|1080p|720p|480p|WEB(-?DL|Rip)?|HDTV|BluRay|BRRip|DVDRip|x26[45]|H ?26[45]|HEVC|PROPER|REPACK|COMPLETE)\b/i.exec(s);
+    if (cut) s = s.slice(0, cut.index);
+    const year = /\(?\b(19|20)\d{2}\b\)?/.exec(s);
+    if (year) s = s.slice(0, year.index) + year[0].replace(/[()]/g, '');
+    return s.replace(/\s+/g, ' ').replace(/[\s-]+$/, '').trim();
+  }
+  function imdbSearchUrl(f) {
+    let q = cleanTitle(f.name);
+    // Episode files named only "E03" or "Episode 3": use the show folder above instead.
+    for (let i = stack.length - 1; q.length < 3 && i > 0; i--) {
+      if (!/^season\b/i.test(stack[i].name)) q = cleanTitle(stack[i].name);
+    }
+    return 'https://www.imdb.com/find/?q=' + encodeURIComponent(q || f.name);
+  }
+
   /* ---------- player ---------- */
   async function openFile(f) {
     current = f;
@@ -250,6 +310,7 @@
       const r = await api(`/files/${f.id}/url`);
       f.direct = r.url;
       el.download.href = dlUrl(f);
+      el.imdb.href = imdbSearchUrl(f);
       el.vlc.hidden = !/Android/i.test(navigator.userAgent);
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');

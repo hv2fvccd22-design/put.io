@@ -136,6 +136,11 @@
     <label class="toggle"><input type="checkbox" id="autoplay"> Auto-start playback when a file opens</label>
     <label class="toggle"><input type="checkbox" id="bufahead"> Buffer ahead (up to 5 min) for patchy signal</label>
     <p class="small muted" style="margin:0">Buffer ahead plays videos through the put.io stream so it can keep downloading ahead. Takes effect on the next file you open.</p>
+    <div class="stack" style="gap:8px">
+      <strong class="small">Folders on the main screen</strong>
+      <div id="rootdirs" class="stack" style="gap:6px"><span class="small muted">Loading&hellip;</span></div>
+      <p class="small muted" style="margin:0">Tick the folders to show. Nothing ticked shows everything.</p>
+    </div>
   </section>
 
   <main>
@@ -171,6 +176,7 @@
       <div class="actions">
         <button id="restart">Start over</button>
         <a id="download" class="btn" href="#" rel="noopener">Download</a>
+        <a id="imdb" class="btn" href="#" target="_blank" rel="noopener noreferrer">IMDb</a>
         <button id="vlc" hidden>Open in VLC</button>
         <button id="mp4" hidden>Switch format</button>
       </div>
