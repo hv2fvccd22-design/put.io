@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v27';
+  const APP_VERSION = 'v28';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -10,6 +10,7 @@
   const KEY_ROOTDIRS = 'resume.rootdirs';
   const KEY_HIDENP = 'resume.hidenp';
   const KEY_PLAYNEXT = 'resume.playnext';
+  const KEY_GRID = 'resume.grid';
   const KEY_OMDB = 'resume.omdbkey';
   const KEY_OMDB_CACHE = 'resume.omdbcache';
   const BUFFER_AHEAD_SECS = 300;
@@ -26,7 +27,7 @@
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
     rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'),
-    save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), omdbkey: $('#omdbkey'),
+    save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
@@ -51,6 +52,12 @@
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
   }
+  // Poster grid for the shows/films inside Movies and TV Shows: on unless switched off.
+  el.grid.checked = store.get(KEY_GRID) !== 'off';
+  el.grid.addEventListener('change', () => {
+    store.set(KEY_GRID, el.grid.checked ? 'on' : 'off');
+    if (!playerOpen) renderList();
+  });
   // Play next: on unless switched off.
   el.playnext.checked = store.get(KEY_PLAYNEXT) !== 'off';
   el.playnext.addEventListener('change', () => store.set(KEY_PLAYNEXT, el.playnext.checked ? 'on' : 'off'));
@@ -285,9 +292,59 @@
     el.back.hidden = stack.length < 2;
   }
 
+  // Poster grid: the shows/films directly inside a Movies or TV Shows folder.
+  const gridMode = () => el.grid.checked && stack.length === 2 && isFilmTvSection();
+  let posterObs = null, posterQueue = [], postersBusy = 0;
+  function renderGrid(hide) {
+    el.list.classList.add('grid');
+    const hasKey = !!store.get(KEY_OMDB);
+    if (posterObs) posterObs.disconnect();
+    posterQueue = [];
+    posterObs = hasKey && 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+      entries.forEach((en) => { if (en.isIntersecting) { posterObs.unobserve(en.target); posterQueue.push(en.target); } });
+      pumpPosters();
+    }, { rootMargin: '300px' }) : null;
+    files.forEach((f, i) => {
+      if (hide && f.file_type !== 'FOLDER' && !isPlayable(f)) return;
+      const p = parseRelease(f.name);
+      const t = document.createElement('button');
+      t.type = 'button'; t.className = 'row tile'; t.dataset.index = String(i);
+      const box = document.createElement('div'); box.className = 'pimg'; box.textContent = p.title || f.name;
+      const nm = document.createElement('div'); nm.className = 'tname'; nm.textContent = p.title || f.name;
+      const meta = document.createElement('div'); meta.className = 'tmeta'; meta.textContent = p.year || '';
+      const sv = offSupported && offMeta()[f.id];
+      if (sv) { const s = document.createElement('span'); s.className = 'saved'; s.textContent = sv.done ? '⤓' : '⤓…'; meta.appendChild(s); }
+      t.append(box, nm, meta);
+      el.list.appendChild(t);
+      if (posterObs && p.title) { t.dataset.title = p.title; t.dataset.year = p.year; posterObs.observe(t); }
+    });
+  }
+  // A few OMDb lookups at a time, for tiles that are on (or near) the screen.
+  function pumpPosters() {
+    while (postersBusy < 3 && posterQueue.length) {
+      const t = posterQueue.shift();
+      if (!t.isConnected) continue;
+      postersBusy++;
+      const { title, year } = t.dataset;
+      (async () => {
+        try {
+          const r = await omdb({ t: title, y: year, type: 'series' }) || await omdb({ t: title, y: year, type: 'movie' });
+          if (!r || !t.isConnected) return;
+          const url = na(r.Poster);
+          if (posterOk(url)) { const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; img.src = url; t.querySelector('.pimg').appendChild(img); }
+          const meta = t.querySelector('.tmeta'), keep = meta.querySelector('.saved');
+          meta.textContent = na(r.Year) || year || '';
+          if (na(r.imdbRating)) { const st = document.createElement('span'); st.className = 'star'; st.textContent = ` ★ ${r.imdbRating}`; meta.appendChild(st); }
+          if (keep) meta.appendChild(keep);
+        } catch (e) { /* leave the plain tile */ } finally { postersBusy--; pumpPosters(); }
+      })();
+    }
+  }
+
   function renderList() {
     renderCrumbs();
     el.list.innerHTML = '';
+    el.list.classList.remove('grid');
     const hide = el.hidenp.checked;
     const visible = files.filter((f) => !hide || f.file_type === 'FOLDER' || isPlayable(f));
     if (!visible.length) {
@@ -295,6 +352,7 @@
       d.textContent = files.length ? 'No playable files here.' : 'This folder is empty.';
       el.list.appendChild(d); return;
     }
+    if (gridMode()) { renderGrid(hide); return; }
     files.forEach((f, i) => {
       if (hide && f.file_type !== 'FOLDER' && !isPlayable(f)) return;
       const row = document.createElement('button');
@@ -372,7 +430,7 @@
     const ok = r.Response === 'True' ? r : null;
     cache[id] = { r: ok, t: Date.now() };
     const keys = Object.keys(cache);
-    if (keys.length > 400) keys.sort((a, b) => cache[a].t - cache[b].t).slice(0, keys.length - 400).forEach((k) => delete cache[k]);
+    if (keys.length > 1500) keys.sort((a, b) => cache[a].t - cache[b].t).slice(0, keys.length - 1500).forEach((k) => delete cache[k]);
     store.set(KEY_OMDB_CACHE, JSON.stringify(cache));
     return ok;
   }
