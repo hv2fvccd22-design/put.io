@@ -1,5 +1,5 @@
 // App-shell cache only. API calls and video streams are never touched.
-const CACHE = 'resume-shell-v6';
+const CACHE = 'resume-shell-v7';
 const SHELL = ['./', 'index.html', 'app.js', 'hls.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -29,7 +29,9 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       try {
-        const res = await fetch(req, { cache: 'no-cache' });
+        // Fetch by URL: a navigation Request can't be re-used with a RequestInit
+        // (that throws), which made page loads always fall back to the cache.
+        const res = await fetch(req.url, { cache: 'no-cache' });
         if (res.ok) cache.put(req, res.clone());
         return res;
       } catch (err) {
