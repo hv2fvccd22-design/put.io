@@ -1,11 +1,13 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v9';
+  const APP_VERSION = 'v10';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
   const KEY_AUTOPLAY = 'resume.autoplay';
+  const KEY_BUFFER = 'resume.buffer';
+  const BUFFER_AHEAD_SECS = 300;
   const SAVE_EVERY_MS = 10000;
   const MIN_SAVE_SECONDS = 5;
 
@@ -17,6 +19,7 @@
     player: $('#player'), video: $('#video'), ptitle: $('#ptitle'),
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
+    bufahead: $('#bufahead'), buf: $('#buf'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
   };
 
@@ -31,6 +34,10 @@
   // Settings (cog). Auto-start applies to every file; off unless switched on; remembered per device.
   el.autoplay.checked = store.get(KEY_AUTOPLAY) === 'on';
   el.autoplay.addEventListener('change', () => store.set(KEY_AUTOPLAY, el.autoplay.checked ? 'on' : 'off'));
+  // Buffer ahead: off unless switched on. Only hls.js lets a page set how far ahead to load.
+  el.bufahead.checked = store.get(KEY_BUFFER) === 'on';
+  el.bufahead.addEventListener('change', () => store.set(KEY_BUFFER, el.bufahead.checked ? 'on' : 'off'));
+  const canBufferAhead = () => el.bufahead.checked && !!(window.Hls && window.Hls.isSupported());
   function toggleSettings(open) {
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
@@ -253,7 +260,8 @@
     const native = ['mp4', 'm4v', 'webm', 'mov', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wav', 'flac'].includes(ext);
     const mp4 = f.is_mp4_available ? ['mp4'] : [];
     // Audio always tries the original file first; put.io's MP4 conversion is video-only.
-    kinds = (native || f.file_type === 'AUDIO') ? ['direct', ...mp4, 'hls'] : [...mp4, 'hls', 'direct'];
+    kinds = f.file_type === 'VIDEO' && canBufferAhead() ? ['hls', ...mp4, 'direct']
+      : (native || f.file_type === 'AUDIO') ? ['direct', ...mp4, 'hls'] : [...mp4, 'hls', 'direct'];
     playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)}` : 'Ready');
     if (f.file_type === 'VIDEO') loadSubtitles(f);
   }
@@ -345,9 +353,17 @@
     // Keep playing across a format switch even when auto-start is off.
     const wasPlaying = !v.paused && !v.ended;
     destroyHls();
-    if (kind === 'hls' && !v.canPlayType('application/vnd.apple.mpegurl')) {
+    const bufferMode = kind === 'hls' && canBufferAhead();
+    if (kind === 'hls' && (bufferMode || !v.canPlayType('application/vnd.apple.mpegurl'))) {
       if (window.Hls && window.Hls.isSupported()) {
-        hls = new window.Hls();
+        // Buffer-ahead keeps ~5 min loaded ahead and drops all but the last minute behind.
+        // The byte cap is a ceiling; browsers may still hold less, and hls.js backs off if so.
+        hls = new window.Hls(bufferMode ? {
+          maxBufferLength: BUFFER_AHEAD_SECS,
+          maxMaxBufferLength: BUFFER_AHEAD_SECS,
+          maxBufferSize: 300 * 1000 * 1000,
+          backBufferLength: 60,
+        } : {});
         hls.on(window.Hls.Events.ERROR, (ev, d) => { if (d && d.fatal) nextKind('The stream failed'); });
         hls.loadSource(src);
         hls.attachMedia(v);
@@ -374,6 +390,21 @@
     }
   }
   el.video.addEventListener('error', () => { if (current && playerOpen) nextKind('Could not play this format'); });
+
+  // How much is loaded ahead of the playhead, shown while buffer-ahead is in use.
+  el.video.addEventListener('progress', showBuffered);
+  el.video.addEventListener('timeupdate', showBuffered);
+  function showBuffered() {
+    const on = !!hls && el.bufahead.checked && playerOpen;
+    el.buf.hidden = !on;
+    if (!on) return;
+    const v = el.video, t = v.currentTime;
+    let ahead = 0;
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (v.buffered.start(i) <= t + 0.5 && v.buffered.end(i) > t) ahead = v.buffered.end(i) - t;
+    }
+    el.buf.textContent = `Buffered ${fmtTime(ahead)} ahead`;
+  }
 
   el.video.addEventListener('loadedmetadata', () => {
     if (!current) return;

@@ -131,6 +131,8 @@
   <section id="settings" class="card stack settings" hidden aria-label="Settings">
     <strong>Settings</strong>
     <label class="toggle"><input type="checkbox" id="autoplay"> Auto-start playback when a file opens</label>
+    <label class="toggle"><input type="checkbox" id="bufahead"> Buffer ahead (up to 5 min) for patchy signal</label>
+    <p class="small muted" style="margin:0">Buffer ahead plays videos through the put.io stream so it can keep downloading ahead. Takes effect on the next file you open.</p>
   </section>
 
   <main>
@@ -174,6 +176,7 @@
         <button id="subdl">Download .srt</button>
       </div>
       <div id="status" class="status" role="status"></div>
+      <div id="buf" class="small muted" hidden></div>
     </section>
   </main>
   <footer id="ver" class="ver"></footer>
