@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v26';
+  const APP_VERSION = 'v27';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -535,7 +535,6 @@
       if (filmTv && navigator.onLine) { el.imdb.href = imdbSearchUrl(f); loadInfo(f); }
       kinds = ['local'];
       playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)} from the saved copy` : 'Playing the saved copy');
-      stopAudioDownload();
       if (f.file_type === 'VIDEO' && filmTv && navigator.onLine) loadSubtitles(f);
       return;
     }
@@ -560,8 +559,9 @@
     kinds = f.file_type === 'VIDEO' && canBufferAhead() ? ['hls', ...mp4, 'direct']
       : (native || f.file_type === 'AUDIO') ? ['direct', ...mp4, 'hls'] : [...mp4, 'hls', 'direct'];
     playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)}` : 'Ready');
-    stopAudioDownload();
-    if (f.file_type === 'AUDIO' && el.bufahead.checked) downloadAudio(f);
+    // Buffer ahead for audio: save the whole file to the phone (kept for re-opens,
+    // tidied up automatically); playback moves to it once it's complete.
+    if (f.file_type === 'AUDIO' && el.bufahead.checked && offSupported && offSource(f)) saveOffline(f, { auto: true });
     if (f.file_type === 'VIDEO' && isFilmTvSection()) loadSubtitles(f);
   }
 
@@ -710,69 +710,16 @@
     }
     el.bufbar.querySelector('.played').style.width = pct(v.currentTime);
   }
-  /* ---------- audio: download the whole file while it plays ---------- */
-  // put.io's download servers allow this page (CORS, Range), so the file is fetched in
-  // the background, resuming after drops, then playback moves to the local copy.
-  let dl = null; // { id, ctrl, url, pct, done }
-  function stopAudioDownload() {
-    if (!dl) return;
-    if (dl.ctrl) dl.ctrl.abort();
-    if (dl.url) URL.revokeObjectURL(dl.url);
-    dl = null;
-  }
-  async function downloadAudio(f) {
-    const me = { id: f.id, ctrl: null, url: null, pct: 0, done: false };
-    dl = me;
-    const chunks = []; let got = 0, total = 0, type = 'audio/mpeg';
-    const live = () => dl === me && current && current.id === f.id;
-    while (live() && !me.done) {
-      try {
-        me.ctrl = new AbortController();
-        const res = await fetch(f.direct, { headers: got ? { Range: `bytes=${got}-` } : {}, signal: me.ctrl.signal });
-        if (!(res.ok || res.status === 206) || !res.body) throw new Error('HTTP ' + res.status);
-        if (got && res.status !== 206) { chunks.length = 0; got = 0; } // server ignored the range: start over
-        type = res.headers.get('content-type') || type;
-        const range = /\/(\d+)$/.exec(res.headers.get('content-range') || '');
-        total = range ? Number(range[1]) : (Number(res.headers.get('content-length')) || 0) + got;
-        const reader = res.body.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value); got += value.length;
-          me.pct = total ? Math.floor((got / total) * 100) : 0;
-          showBuffered();
-        }
-        if (!total || got >= total) me.done = true;
-      } catch (e) {
-        if (!live()) return;
-        if (e.name === 'AbortError') return;
-        showBuffered();
-        await new Promise((r) => setTimeout(r, 5000)); // signal dropped: wait, then resume from `got`
-        if (f.direct && (await refreshDirect(f)) === false) return;
-      }
-    }
-    if (!live()) return;
-    // Swap the player to the downloaded copy at the same spot, keeping play/pause.
-    me.url = URL.createObjectURL(new Blob(chunks, { type }));
-    chunks.length = 0;
-    const v = el.video, t = v.currentTime, wasPlaying = !v.paused && !v.ended;
-    if (t > MIN_SAVE_SECONDS) current.start_from = Math.floor(t);
-    destroyHls();
-    v.src = me.url;
-    if (wasPlaying) v.play().catch(() => {});
-    showBuffered();
-  }
-  // The direct link can expire during a long outage; ask put.io for a fresh one.
-  async function refreshDirect(f) {
-    try { const r = await api(`/files/${f.id}/url`); if (r && r.url) f.direct = r.url; return true; }
-    catch (e) { return !e.auth; }
-  }
-
   function showBuffered() {
     drawBufBar();
-    if (dl && playerOpen && current && dl.id === current.id) {
+    // Audio being saved to the phone (Buffer ahead or Save offline): show its progress.
+    const sv = playerOpen && current && current.file_type === 'AUDIO' && offSupported ? offMeta()[current.id] : null;
+    if (sv) {
       el.buf.hidden = false;
-      el.buf.textContent = dl.url ? 'Fully downloaded: safe without signal' : `Downloading for offline: ${dl.pct}%`;
+      const act = offActive && offActive.id === current.id && offActive.total;
+      el.buf.textContent = sv.done ? 'Fully downloaded: safe without signal'
+        : act ? `Downloading for offline: ${Math.floor((offActive.got / offActive.total) * 100)}%${offActive.waiting ? ' (waiting for signal)' : ''}`
+        : 'Waiting to download…';
       return;
     }
     const on = !!hls && el.bufahead.checked && playerOpen;
@@ -816,6 +763,8 @@
     try { await position.reset(id, false); } catch (e) { /* leave saved position */ }
     delete pending[id]; savePending();
     current.start_from = 0; lastSavedSecs = -1;
+    const om = offSupported && offMeta()[id];
+    if (om && om.auto && om.done) deleteOffline(id);
     const n = el.playnext.checked ? nextFile() : null;
     if (n && current.id === id) { openFile(n, { next: true }); return; }
     setStatus('Finished. Position cleared.');
@@ -852,42 +801,73 @@
     try {
       const files = await Promise.all((await partFiles(id)).map(([, h]) => h.getFile()));
       if (!files.length) return null;
-      localUrlNow = URL.createObjectURL(new Blob(files, { type: 'video/mp4' }));
+      localUrlNow = URL.createObjectURL(new Blob(files, { type: it.mime || 'video/mp4' }));
       return localUrlNow;
     } catch (e) { return null; }
   }
+  const AUDIO_EXT = ['mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wav', 'flac'];
+  const AUTO_KEEP = 5; // automatic audio copies kept (Buffer ahead)
   function offSource(f) {
     const ext = (f.name.split('.').pop() || '').toLowerCase();
+    if (f.file_type === 'AUDIO') return AUDIO_EXT.includes(ext) ? 'direct' : null;
     if (['mp4', 'm4v', 'webm'].includes(ext)) return 'direct';
     if (f.is_mp4_available) return 'mp4';
     return null;
   }
   function updateSaveButton(f) {
-    const show = f && f.file_type === 'VIDEO' && isFilmTvSection() && offSupported;
+    const show = f && offSupported && ((f.file_type === 'VIDEO' && isFilmTvSection()) || f.file_type === 'AUDIO');
     el.save.hidden = !show;
     if (!show) return;
     const it = offMeta()[f.id];
     el.save.disabled = false;
-    if (it && it.done) el.save.textContent = 'Saved offline ✓';
+    if (it && it.auto) el.save.textContent = it.done ? 'Keep offline' : 'Keep offline (buffering)';
+    else if (it && it.done) el.save.textContent = 'Saved offline ✓';
     else if (it) el.save.textContent = offActive && offActive.id === f.id && offActive.total
       ? `Saving ${Math.floor((offActive.got / offActive.total) * 100)}%${offActive.waiting ? ' (waiting for signal)' : ''}` : 'Queued…';
     else el.save.textContent = 'Save offline';
   }
   el.save.addEventListener('click', () => {
     if (!current) return;
-    const it = offMeta()[current.id];
+    const m = offMeta(), it = m[current.id];
+    if (it && it.auto) { it.auto = false; offSaveMeta(m); offRefresh(); return; } // keep a buffered copy
     if (it && it.done) { el.settings.hidden && el.cog.click(); return; } // manage in Settings
     if (!it) saveOffline(current);
   });
-  async function saveOffline(f) {
+  async function saveOffline(f, opts = {}) {
     const kind = offSource(f);
-    if (!kind) { setStatus("put.io hasn't made an MP4 of this file yet, so it can't be saved for offline.", 'warn'); return; }
+    if (!kind) { if (!opts.auto) setStatus("put.io hasn't made an MP4 of this file yet, so it can't be saved for offline.", 'warn'); return; }
     const m = offMeta();
-    m[f.id] = { id: f.id, name: f.name, folder: showFolderTitle() || stack[stack.length - 1].name, kind, total: f.size || 0, done: false, poster: el.video.getAttribute('poster') || '', at: Date.now() };
+    if (m[f.id]) { if (!opts.auto && m[f.id].auto) { m[f.id].auto = false; offSaveMeta(m); offRefresh(); } return; }
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    const mime = f.file_type === 'AUDIO' ? ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac' })[ext] || 'audio/mpeg'
+      : ext === 'webm' ? 'video/webm' : 'video/mp4';
+    m[f.id] = { id: f.id, name: f.name, folder: showFolderTitle() || stack[stack.length - 1].name, kind, mime, file_type: f.file_type,
+      total: f.size || 0, done: false, auto: !!opts.auto, poster: el.video.getAttribute('poster') || '', at: Date.now() };
     offSaveMeta(m);
+    if (opts.auto) pruneAuto(f.id);
     try { if (navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* best effort */ }
-    if (!offQueue.includes(f.id)) offQueue.push(f.id);
+    // The file you're playing goes to the front of the queue.
+    offQueue = offQueue.filter((x) => x !== f.id);
+    if (current && current.id === f.id) offQueue.unshift(f.id); else offQueue.push(f.id);
     offRefresh(); runOfflineQueue();
+  }
+  // Keep only the newest AUTO_KEEP automatic copies (never the one playing).
+  function pruneAuto(keepId) {
+    const autos = Object.values(offMeta()).filter((x) => x.auto).sort((a, b) => b.at - a.at);
+    autos.slice(AUTO_KEEP).forEach((x) => { if (x.id !== keepId && !(current && current.id === x.id)) deleteOffline(x.id); });
+  }
+  // A download for the file on screen just finished: carry on from the phone's copy.
+  async function swapToLocal(id) {
+    if (!current || current.id !== id || !playerOpen || kinds[kindIdx] === 'local') return;
+    const url = await offlineUrl(id); if (!url) return;
+    const v = el.video, t = v.currentTime, wasPlaying = !v.paused && !v.ended;
+    if (t > MIN_SAVE_SECONDS) current.start_from = Math.floor(t);
+    current.localUrl = url;
+    destroyHls();
+    kinds = ['local']; kindIdx = 0;
+    v.src = url;
+    if (wasPlaying) v.play().catch(() => {});
+    showBuffered();
   }
   // Resume unfinished downloads when the app opens.
   function resumeOffline() {
@@ -953,6 +933,7 @@
     if (finished) { const m = offMeta(); if (m[id]) { m[id].done = true; m[id].total = got; offSaveMeta(m); } }
     offActive = null;
     offRefresh();
+    if (finished) swapToLocal(id);
     runOfflineQueue();
   }
   async function deleteOffline(id) {
@@ -964,7 +945,7 @@
     runOfflineQueue();
   }
   function offProgress() {
-    if (current) updateSaveButton(current);
+    if (current) { updateSaveButton(current); showBuffered(); }
     if (!el.settings.hidden) renderOffline();
   }
   function offRefresh() { offProgress(); if (!playerOpen) renderList(); renderOffline(); }
@@ -977,7 +958,7 @@
       const row = document.createElement('div'); row.className = 'offrow';
       const n = document.createElement('span'); n.className = 'offname small';
       const pct = offActive && offActive.id === it.id && offActive.total ? Math.floor((offActive.got / offActive.total) * 100) : null;
-      n.textContent = `${it.name} · ${it.done ? fmtSize(it.total) : pct != null ? `${pct}%${offActive.waiting ? ' (waiting for signal)' : ''}` : 'queued'}`;
+      n.textContent = `${it.name} · ${it.done ? fmtSize(it.total) : pct != null ? `${pct}%${offActive.waiting ? ' (waiting for signal)' : ''}` : 'queued'}${it.auto ? ' · buffer' : ''}`;
       n.title = it.name;
       row.appendChild(n);
       if (it.done) { const p = document.createElement('button'); p.type = 'button'; p.className = 'small'; p.textContent = 'Play'; p.dataset.play = String(it.id); row.appendChild(p); }
@@ -996,7 +977,7 @@
     if (p) {
       const it = offMeta()[Number(p.dataset.play)]; if (!it) return;
       toggleSettings(false);
-      openFile({ id: it.id, name: it.name, file_type: 'VIDEO', size: it.total, start_from: 0 });
+      openFile({ id: it.id, name: it.name, file_type: it.file_type || 'VIDEO', size: it.total, start_from: 0 });
     }
   });
 
@@ -1060,7 +1041,6 @@
   async function closePlayer() {
     if (!playerOpen) return;
     await saveNow(false);
-    stopAudioDownload();
     revokeLocal();
     el.video.pause(); destroyHls(); clearSubtitles();
     el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load();
@@ -1124,7 +1104,6 @@
 
   function logout(msg) {
     token = null; store.del(KEY_TOKEN);
-    stopAudioDownload();
     if (playerOpen) { el.video.pause(); el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load(); playerOpen = false; current = null; }
     stack = [{ id: 0, name: 'Files' }];
     setTitle('');
