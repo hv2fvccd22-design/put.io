@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v25';
+  const APP_VERSION = 'v26';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -25,7 +25,8 @@
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
-    rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'), omdbkey: $('#omdbkey'),
+    rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'),
+    save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
@@ -67,7 +68,7 @@
   el.cog.addEventListener('click', () => {
     const open = el.settings.hidden;
     toggleSettings(open);
-    if (open) loadRootDirs();
+    if (open) { loadRootDirs(); renderOffline(); }
   });
 
   // Which top-level folders the main screen shows, by put.io folder id.
@@ -300,6 +301,8 @@
       row.type = 'button'; row.className = 'row'; row.dataset.index = String(i);
       const k = document.createElement('span'); k.className = 'kind' + (f.file_type === 'VIDEO' ? ' vid' : ''); k.textContent = kindLabel(f.file_type);
       const n = document.createElement('span'); n.className = 'name'; n.textContent = f.name;
+      const sv = offSupported && offMeta()[f.id];
+      if (sv) { const s = document.createElement('span'); s.className = 'saved'; s.textContent = sv.done ? '⤓ saved' : '⤓ saving'; n.appendChild(s); }
       const m = document.createElement('span'); m.className = 'meta';
       m.textContent = f.file_type === 'FOLDER' ? '' : fmtSize(f.size);
       const pos = pending[f.id] != null ? pending[f.id] : f.start_from;
@@ -520,6 +523,23 @@
     }
     f.start_from = start;
 
+    revokeLocal();
+    const localUrl = await offlineUrl(f.id);
+    updateSaveButton(f);
+    if (localUrl) {
+      // Saved for offline: play the phone's copy, no stream link needed.
+      current.localUrl = localUrl;
+      el.download.href = '#';
+      const filmTv = isFilmTvSection();
+      el.imdb.hidden = !filmTv;
+      if (filmTv && navigator.onLine) { el.imdb.href = imdbSearchUrl(f); loadInfo(f); }
+      kinds = ['local'];
+      playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)} from the saved copy` : 'Playing the saved copy');
+      stopAudioDownload();
+      if (f.file_type === 'VIDEO' && filmTv && navigator.onLine) loadSubtitles(f);
+      return;
+    }
+
     try {
       const r = await api(`/files/${f.id}/url`);
       f.direct = r.url;
@@ -617,9 +637,10 @@
 
   /* ---------- formats: direct file, put.io MP4 conversion, or HLS stream ---------- */
   let hls = null, kinds = [], kindIdx = 0;
-  const KIND_LABEL = { direct: 'original file', mp4: 'put.io MP4', hls: 'put.io stream' };
+  const KIND_LABEL = { direct: 'original file', mp4: 'put.io MP4', hls: 'put.io stream', local: 'saved copy' };
   function destroyHls() { if (hls) { hls.destroy(); hls = null; } }
   function srcFor(kind) {
+    if (kind === 'local') return current.localUrl;
     if (kind === 'direct') return current.direct;
     const u = new URL(`${API}/files/${current.id}/${kind === 'mp4' ? 'mp4/stream' : 'hls/media.m3u8'}`);
     u.searchParams.set('oauth_token', token);
@@ -806,6 +827,179 @@
   }
   el.next.addEventListener('click', playNext);
 
+  /* ---------- offline downloads (Movies / TV Shows) ---------- */
+  // Saved into the app's private storage (OPFS) in ~32 MB parts, so a dropped signal or a
+  // closed app loses at most one part; the download resumes from the last finished part.
+  // Saves the version the browser can play: the original if it's MP4/WebM, else put.io's MP4.
+  const KEY_OFFLINE = 'resume.offline';
+  const PART = 32 * 1024 * 1024;
+  const offSupported = !!(navigator.storage && navigator.storage.getDirectory && window.FileSystemFileHandle && FileSystemFileHandle.prototype.createWritable);
+  const offMeta = () => { try { return JSON.parse(store.get(KEY_OFFLINE) || '{}') || {}; } catch (e) { return {}; } };
+  const offSaveMeta = (m) => store.set(KEY_OFFLINE, JSON.stringify(m));
+  const partName = (id, i) => `ep-${id}.${String(i).padStart(4, '0')}`;
+  let offQueue = [], offActive = null, localUrlNow = null;
+
+  function revokeLocal() { if (localUrlNow) { URL.revokeObjectURL(localUrlNow); localUrlNow = null; } }
+  async function partFiles(id) {
+    const dir = await navigator.storage.getDirectory(), out = [];
+    for await (const [name, handle] of dir.entries()) if (name.startsWith(`ep-${id}.`)) out.push([name, handle]);
+    out.sort((a, b) => a[0].localeCompare(b[0]));
+    return out;
+  }
+  async function offlineUrl(id) {
+    const it = offMeta()[id];
+    if (!offSupported || !it || !it.done) return null;
+    try {
+      const files = await Promise.all((await partFiles(id)).map(([, h]) => h.getFile()));
+      if (!files.length) return null;
+      localUrlNow = URL.createObjectURL(new Blob(files, { type: 'video/mp4' }));
+      return localUrlNow;
+    } catch (e) { return null; }
+  }
+  function offSource(f) {
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    if (['mp4', 'm4v', 'webm'].includes(ext)) return 'direct';
+    if (f.is_mp4_available) return 'mp4';
+    return null;
+  }
+  function updateSaveButton(f) {
+    const show = f && f.file_type === 'VIDEO' && isFilmTvSection() && offSupported;
+    el.save.hidden = !show;
+    if (!show) return;
+    const it = offMeta()[f.id];
+    el.save.disabled = false;
+    if (it && it.done) el.save.textContent = 'Saved offline ✓';
+    else if (it) el.save.textContent = offActive && offActive.id === f.id && offActive.total
+      ? `Saving ${Math.floor((offActive.got / offActive.total) * 100)}%${offActive.waiting ? ' (waiting for signal)' : ''}` : 'Queued…';
+    else el.save.textContent = 'Save offline';
+  }
+  el.save.addEventListener('click', () => {
+    if (!current) return;
+    const it = offMeta()[current.id];
+    if (it && it.done) { el.settings.hidden && el.cog.click(); return; } // manage in Settings
+    if (!it) saveOffline(current);
+  });
+  async function saveOffline(f) {
+    const kind = offSource(f);
+    if (!kind) { setStatus("put.io hasn't made an MP4 of this file yet, so it can't be saved for offline.", 'warn'); return; }
+    const m = offMeta();
+    m[f.id] = { id: f.id, name: f.name, folder: showFolderTitle() || stack[stack.length - 1].name, kind, total: f.size || 0, done: false, poster: el.video.getAttribute('poster') || '', at: Date.now() };
+    offSaveMeta(m);
+    try { if (navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* best effort */ }
+    if (!offQueue.includes(f.id)) offQueue.push(f.id);
+    offRefresh(); runOfflineQueue();
+  }
+  // Resume unfinished downloads when the app opens.
+  function resumeOffline() {
+    if (!offSupported) return;
+    Object.values(offMeta()).forEach((it) => { if (!it.done && !offQueue.includes(it.id)) offQueue.push(it.id); });
+    runOfflineQueue();
+  }
+  async function runOfflineQueue() {
+    if (offActive || !token) return;
+    const id = offQueue.shift(); if (id == null) return;
+    const it = offMeta()[id]; if (!it || it.done) { runOfflineQueue(); return; }
+    const me = offActive = { id, got: 0, total: it.total || 0, ctrl: null, waiting: false };
+    const dir = await navigator.storage.getDirectory();
+    // Keep only whole parts; the unfinished last one is re-downloaded.
+    let parts = await partFiles(id), got = 0, idx = 0;
+    for (const [name, h] of parts) {
+      const size = (await h.getFile()).size;
+      if (size === PART) { got += PART; idx++; } else await dir.removeEntry(name);
+    }
+    me.got = got;
+    let fails = 0, finished = false;
+    while (offActive === me && !finished) {
+      let w = null, inPart = 0;
+      try {
+        me.ctrl = new AbortController();
+        const u = new URL(`${API}/files/${id}/${it.kind === 'mp4' ? 'mp4/stream' : 'download'}`);
+        u.searchParams.set('oauth_token', token);
+        const res = await fetch(u, { headers: got ? { Range: `bytes=${got}-` } : {}, signal: me.ctrl.signal });
+        if (res.status === 416) { finished = true; break; }
+        if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+        if (got && res.status !== 206) throw new Error('resume not supported');
+        const range = /\/(\d+)$/.exec(res.headers.get('content-range') || '');
+        me.total = range ? Number(range[1]) : (Number(res.headers.get('content-length')) || 0) + got;
+        me.waiting = false; fails = 0;
+        const reader = res.body.getReader();
+        let last = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          let off = 0;
+          while (off < value.length) {
+            if (!w) { w = await (await dir.getFileHandle(partName(id, idx), { create: true })).createWritable(); inPart = 0; }
+            const n = Math.min(PART - inPart, value.length - off);
+            await w.write(value.subarray(off, off + n));
+            off += n; inPart += n; got += n; me.got = got;
+            if (inPart === PART) { await w.close(); w = null; idx++; }
+          }
+          if (Date.now() - last > 1000) { last = Date.now(); offProgress(); }
+        }
+        if (w) { await w.close(); w = null; }
+        if (!me.total || got >= me.total) finished = true;
+      } catch (e) {
+        if (w) { try { await w.abort(); } catch (x) { /* ignore */ } }
+        if (offActive !== me || e.name === 'AbortError') return;
+        if (e.name === 'QuotaExceededError') { setStatus('Not enough space on the phone to save this episode.', 'warn'); break; }
+        // Roll back to the last whole part, then wait and resume.
+        got -= inPart; me.got = got;
+        fails++; me.waiting = true; offProgress();
+        await new Promise((r) => setTimeout(r, Math.min(30000, 3000 * fails)));
+      }
+    }
+    if (offActive !== me) return;
+    if (finished) { const m = offMeta(); if (m[id]) { m[id].done = true; m[id].total = got; offSaveMeta(m); } }
+    offActive = null;
+    offRefresh();
+    runOfflineQueue();
+  }
+  async function deleteOffline(id) {
+    if (offActive && offActive.id === id) { const a = offActive; offActive = null; if (a.ctrl) a.ctrl.abort(); }
+    offQueue = offQueue.filter((x) => x !== id);
+    const m = offMeta(); delete m[id]; offSaveMeta(m);
+    try { const dir = await navigator.storage.getDirectory(); for (const [name] of await partFiles(id)) await dir.removeEntry(name); } catch (e) { /* ignore */ }
+    offRefresh();
+    runOfflineQueue();
+  }
+  function offProgress() {
+    if (current) updateSaveButton(current);
+    if (!el.settings.hidden) renderOffline();
+  }
+  function offRefresh() { offProgress(); if (!playerOpen) renderList(); renderOffline(); }
+  async function renderOffline() {
+    if (!offSupported) { el.offlist.innerHTML = '<span class="small muted">This browser can\'t save files for offline.</span>'; el.offspace.textContent = ''; return; }
+    const items = Object.values(offMeta()).sort((a, b) => a.at - b.at);
+    el.offlist.innerHTML = '';
+    if (!items.length) el.offlist.innerHTML = '<span class="small muted">Nothing saved. Use "Save offline" in the player for a film or episode.</span>';
+    items.forEach((it) => {
+      const row = document.createElement('div'); row.className = 'offrow';
+      const n = document.createElement('span'); n.className = 'offname small';
+      const pct = offActive && offActive.id === it.id && offActive.total ? Math.floor((offActive.got / offActive.total) * 100) : null;
+      n.textContent = `${it.name} · ${it.done ? fmtSize(it.total) : pct != null ? `${pct}%${offActive.waiting ? ' (waiting for signal)' : ''}` : 'queued'}`;
+      n.title = it.name;
+      row.appendChild(n);
+      if (it.done) { const p = document.createElement('button'); p.type = 'button'; p.className = 'small'; p.textContent = 'Play'; p.dataset.play = String(it.id); row.appendChild(p); }
+      const d = document.createElement('button'); d.type = 'button'; d.className = 'ghost small'; d.textContent = 'Delete'; d.dataset.del = String(it.id);
+      row.appendChild(d);
+      el.offlist.appendChild(row);
+    });
+    try {
+      const est = await navigator.storage.estimate();
+      el.offspace.textContent = `Using ${fmtSize(est.usage || 0)} of about ${fmtSize(est.quota || 0)} available to the app.`;
+    } catch (e) { el.offspace.textContent = ''; }
+  }
+  el.offlist.addEventListener('click', (e) => {
+    const p = e.target.closest('button[data-play]'), d = e.target.closest('button[data-del]');
+    if (d) { const it = offMeta()[Number(d.dataset.del)]; if (it && confirm(`Delete the saved copy of "${it.name}"?`)) deleteOffline(it.id); return; }
+    if (p) {
+      const it = offMeta()[Number(p.dataset.play)]; if (!it) return;
+      toggleSettings(false);
+      openFile({ id: it.id, name: it.name, file_type: 'VIDEO', size: it.total, start_from: 0 });
+    }
+  });
+
   /* ---------- lock screen / notification (Media Session) ---------- */
   // What the phone shows while playing: title, the folder or show as the second line,
   // and the cover/poster as the picture (the app icon until one is known).
@@ -867,6 +1061,7 @@
     if (!playerOpen) return;
     await saveNow(false);
     stopAudioDownload();
+    revokeLocal();
     el.video.pause(); destroyHls(); clearSubtitles();
     el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load();
     const f = files.find((x) => current && x.id === current.id);
@@ -956,6 +1151,7 @@
   });
 
   function start() {
+    setTimeout(resumeOffline, 0);
     show('browser');
     history.replaceState({ d: 1 }, '');
     loadFolder(stack[stack.length - 1].id); renderCrumbs();

@@ -123,6 +123,10 @@
   .subsel { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 100%; min-width: 0; flex: 1 1 160px; }
   .settings { margin-bottom: 14px; }
   .settings .toggle { color: var(--fg); padding: 0; }
+  .offrow { display: flex; align-items: center; gap: 8px; }
+  .offrow .offname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .offrow button { padding: 4px 10px; }
+  .saved { color: var(--accent); font-size: .75rem; margin-left: 6px; }
   .dirrow { display: flex; align-items: center; gap: 6px; }
   .dirrow .toggle { flex: 1; min-width: 0; }
   .dirrow .mv { padding: 4px 10px; }
@@ -151,6 +155,11 @@
     <label class="toggle"><input type="checkbox" id="hidenp"> Hide non-playable files (images, .nfo, .txt…)</label>
     <label class="toggle"><input type="checkbox" id="bufahead"> Buffer ahead for patchy signal</label>
     <p class="small muted" style="margin:0">Video: plays through the put.io stream and keeps up to 5 min loaded ahead. Audio: downloads the whole file while you listen, then plays from the phone. Takes effect on the next file you open.</p>
+    <div class="stack" style="gap:8px">
+      <strong class="small">Offline downloads</strong>
+      <div id="offlist" class="stack" style="gap:6px"></div>
+      <p id="offspace" class="small muted" style="margin:0"></p>
+    </div>
     <div class="stack" style="gap:8px">
       <label for="omdbkey" class="small"><strong>OMDb API key</strong> <span class="muted">(for IMDb ratings, posters and plots)</span></label>
       <input id="omdbkey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key">
@@ -213,6 +222,7 @@
       <div class="actions">
         <button id="restart">Start over</button>
         <button id="next" hidden>Next &#9654;</button>
+        <button id="save" hidden>Save offline</button>
         <a id="download" class="btn" href="#" rel="noopener">Download</a>
         <a id="imdb" class="btn" href="#" target="_blank" rel="noopener noreferrer">IMDb</a>
         <button id="vlc" hidden>Open in VLC</button>
