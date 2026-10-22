@@ -1,6 +1,7 @@
 (() => {
   'use strict';
 
+  const APP_VERSION = 'v6';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -26,6 +27,7 @@
   };
 
   let token = store.get(KEY_TOKEN);
+  $('#ver').textContent = APP_VERSION;
   // Auto-start playback when a file opens. On unless switched off; remembered per device.
   el.autoplay.checked = store.get(KEY_AUTOPLAY) !== 'off';
   el.autoplay.addEventListener('change', () => store.set(KEY_AUTOPLAY, el.autoplay.checked ? 'on' : 'off'));
