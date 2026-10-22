@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v14';
+  const APP_VERSION = 'v15';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -25,6 +25,7 @@
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
     rootdirs: $('#rootdirs'), imdb: $('#imdb'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
+    finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
   };
 
@@ -206,6 +207,7 @@
       const picked = rootPicks();
       if (id === 0 && picked.size) files = files.filter((f) => picked.has(f.id));
       renderList();
+      loadFolderInfo();
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
       el.list.innerHTML = '';
@@ -319,6 +321,40 @@
     for (let i = stack.length - 1; i > 0; i--) if (!/^season\b/i.test(stack[i].name)) return stack[i].name;
     return '';
   }
+  const na = (v) => (v && v !== 'N/A' ? v : '');
+  function fillMeta(metaEl, rating, parts) {
+    metaEl.innerHTML = '';
+    if (rating) { const st = document.createElement('span'); st.className = 'star'; st.textContent = `★ ${rating}`; metaEl.append(st, parts.length ? ' · ' : ''); }
+    metaEl.append(parts.join(' · '));
+  }
+  function setPoster(img, url) {
+    if (url && url.startsWith('https://m.media-amazon.com/')) { img.src = url; img.hidden = false; }
+    else { img.hidden = true; img.removeAttribute('src'); }
+  }
+
+  // Show/film card at the top of a folder (e.g. "Dark Matter (2024)" or its "Season 1").
+  let folderInfoFor = null;
+  async function loadFolderInfo() {
+    const depth = stack.length;
+    const name = showFolderTitle();
+    // Top-level folders (Movies, TV Shows...) are categories, not titles: start one level down.
+    if (!store.get(KEY_OMDB) || depth < 3 || !name) { el.finfo.hidden = true; folderInfoFor = null; return; }
+    if (folderInfoFor === name) return; // same show (e.g. moving into a Season folder): keep the card
+    el.finfo.hidden = true; folderInfoFor = name;
+    const p = parseRelease(name);
+    if (!p.title) return;
+    try {
+      const r = await omdb({ t: p.title, y: p.year, type: 'series' }) || await omdb({ t: p.title, y: p.year, type: 'movie' });
+      if (folderInfoFor !== name || !r) return;
+      el.finfoTitle.textContent = `${r.Title}${na(r.Year) ? ` (${r.Year})` : ''}`;
+      fillMeta(el.finfoMeta, na(r.imdbRating), [na(r.totalSeasons) && `${r.totalSeasons} season${r.totalSeasons === '1' ? '' : 's'}`, na(r.Runtime), na(r.Genre)].filter(Boolean));
+      el.finfoPlot.textContent = na(r.Plot);
+      setPoster(el.fposter, na(r.Poster));
+      el.finfoImdb.href = `https://www.imdb.com/title/${encodeURIComponent(r.imdbID)}/`;
+      el.finfo.hidden = false;
+    } catch (e) { /* no card; the folder list still works */ }
+  }
+
   async function loadInfo(f) {
     el.info.hidden = true; el.poster.hidden = true; el.poster.removeAttribute('src');
     if (!store.get(KEY_OMDB) || f.file_type !== 'VIDEO') return;
@@ -331,16 +367,11 @@
       if (!current || current.id !== f.id || !main) return;
       const ep = isEp ? await omdb({ i: main.imdbID, Season: p.season, Episode: p.episode }) : null;
       if (!current || current.id !== f.id) return;
-      const na = (v) => (v && v !== 'N/A' ? v : '');
       const src = ep || main;
       el.infoTitle.textContent = ep ? `${main.Title}: S${p.season}E${p.episode} ${na(ep.Title)}` : `${main.Title} (${na(main.Year)})`;
-      el.infoMeta.innerHTML = '';
-      const rating = na(src.imdbRating) || na(main.imdbRating);
-      if (rating) { const st = document.createElement('span'); st.className = 'star'; st.textContent = `★ ${rating}`; el.infoMeta.append(st, ' · '); }
-      el.infoMeta.append([na(src.Runtime), na(main.Genre)].filter(Boolean).join(' · '));
+      fillMeta(el.infoMeta, na(src.imdbRating) || na(main.imdbRating), [na(src.Runtime), na(main.Genre)].filter(Boolean));
       el.infoPlot.textContent = na(src.Plot) || na(main.Plot);
-      const poster = na(src.Poster) || na(main.Poster);
-      if (poster && poster.startsWith('https://m.media-amazon.com/')) { el.poster.src = poster; el.poster.hidden = false; }
+      setPoster(el.poster, na(src.Poster) || na(main.Poster));
       el.imdb.href = `https://www.imdb.com/title/${encodeURIComponent(src.imdbID || main.imdbID)}/`;
       el.info.hidden = false;
     } catch (e) {

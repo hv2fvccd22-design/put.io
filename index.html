@@ -111,6 +111,7 @@
   .bufbar .ranges > div { position: absolute; top: 0; bottom: 0; background: #fdce45; }
   .bufbar .played { position: absolute; top: 0; bottom: 0; left: 0; background: var(--fg); border-right: 2px solid var(--bg); }
   .info { display: flex; gap: 12px; margin: 8px 0 4px; align-items: flex-start; }
+  .info.card { margin: 0 0 12px; padding: 12px; }
   .info img { width: 80px; flex: none; border-radius: 6px; background: var(--surface-2); }
   .info-text { min-width: 0; }
   .info-title { font-weight: 650; }
@@ -177,6 +178,15 @@
 
     <section id="browser" hidden>
       <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+      <div id="finfo" class="info card" hidden>
+        <img id="fposter" alt="" hidden>
+        <div class="info-text">
+          <div id="finfo-title" class="info-title"></div>
+          <div id="finfo-meta" class="small muted"></div>
+          <p id="finfo-plot" class="small"></p>
+          <a id="finfo-imdb" class="small" href="#" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">Open on IMDb</a>
+        </div>
+      </div>
       <div id="list" class="list" aria-live="polite"></div>
     </section>
 
