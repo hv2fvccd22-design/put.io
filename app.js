@@ -1,13 +1,14 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v18';
+  const APP_VERSION = 'v19';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
   const KEY_AUTOPLAY = 'resume.autoplay';
   const KEY_BUFFER = 'resume.buffer';
   const KEY_ROOTDIRS = 'resume.rootdirs';
+  const KEY_HIDENP = 'resume.hidenp';
   const KEY_OMDB = 'resume.omdbkey';
   const KEY_OMDB_CACHE = 'resume.omdbcache';
   const BUFFER_AHEAD_SECS = 300;
@@ -23,7 +24,7 @@
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
-    rootdirs: $('#rootdirs'), imdb: $('#imdb'), omdbkey: $('#omdbkey'),
+    rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
@@ -48,6 +49,12 @@
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
   }
+  // Hide non-playable files in lists: on unless switched off.
+  el.hidenp.checked = store.get(KEY_HIDENP) !== 'off';
+  el.hidenp.addEventListener('change', () => {
+    store.set(KEY_HIDENP, el.hidenp.checked ? 'on' : 'off');
+    if (!playerOpen) renderList();
+  });
   el.omdbkey.value = store.get(KEY_OMDB) || '';
   el.omdbkey.addEventListener('change', () => {
     const k = el.omdbkey.value.trim();
@@ -240,11 +247,15 @@
   function renderList() {
     renderCrumbs();
     el.list.innerHTML = '';
-    if (!files.length) {
-      const d = document.createElement('div'); d.className = 'empty'; d.textContent = 'This folder is empty.';
+    const hide = el.hidenp.checked;
+    const visible = files.filter((f) => !hide || f.file_type === 'FOLDER' || isPlayable(f));
+    if (!visible.length) {
+      const d = document.createElement('div'); d.className = 'empty';
+      d.textContent = files.length ? 'No playable files here.' : 'This folder is empty.';
       el.list.appendChild(d); return;
     }
     files.forEach((f, i) => {
+      if (hide && f.file_type !== 'FOLDER' && !isPlayable(f)) return;
       const row = document.createElement('button');
       row.type = 'button'; row.className = 'row'; row.dataset.index = String(i);
       const k = document.createElement('span'); k.className = 'kind' + (f.file_type === 'VIDEO' ? ' vid' : ''); k.textContent = kindLabel(f.file_type);
