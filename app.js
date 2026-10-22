@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v15';
+  const APP_VERSION = 'v16';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -328,15 +328,37 @@
     metaEl.append(parts.join(' · '));
   }
   function setPoster(img, url) {
-    if (url && url.startsWith('https://m.media-amazon.com/')) { img.src = url; img.hidden = false; }
+    if (url && (url.startsWith('https://m.media-amazon.com/') || url.startsWith('https://api.put.io/'))) { img.src = url; img.hidden = false; }
     else { img.hidden = true; img.removeAttribute('src'); }
   }
 
-  // Show/film card at the top of a folder (e.g. "Dark Matter (2024)" or its "Season 1").
+  // IMDb and put.io subtitles only make sense under the Movies / TV Shows top-level
+  // folders; podcasts, music etc. get their folder's own cover image instead.
+  const isFilmTvSection = () => stack.length > 1 && /^(movies?|films?|tv( shows?)?|series)$/i.test(stack[1].name.trim());
+  // put.io gives image files a token-free preview link ("screenshot").
+  function folderCover(list) {
+    const imgs = list.filter((f) => f.file_type === 'IMAGE' && (f.screenshot || f.icon));
+    const pick = imgs.find((f) => /^(cover|folder|poster|artwork|front)\./i.test(f.name)) || imgs[0];
+    return pick ? (pick.screenshot || pick.icon) : '';
+  }
+
+  // Card at the top of a folder: IMDb details for a show/film, or the cover image elsewhere.
   let folderInfoFor = null;
   async function loadFolderInfo() {
     const depth = stack.length;
     const name = showFolderTitle();
+    if (depth >= 2 && !isFilmTvSection()) {
+      folderInfoFor = null;
+      const cover = folderCover(files);
+      if (!cover) { el.finfo.hidden = true; return; }
+      el.finfoTitle.textContent = stack[depth - 1].name;
+      el.finfoMeta.textContent = ''; el.finfoPlot.textContent = '';
+      el.finfoImdb.hidden = true;
+      setPoster(el.fposter, cover);
+      el.finfo.hidden = false;
+      return;
+    }
+    el.finfoImdb.hidden = false;
     // Top-level folders (Movies, TV Shows...) are categories, not titles: start one level down.
     if (!store.get(KEY_OMDB) || depth < 3 || !name) { el.finfo.hidden = true; folderInfoFor = null; return; }
     if (folderInfoFor === name) return; // same show (e.g. moving into a Season folder): keep the card
@@ -353,6 +375,16 @@
       el.finfoImdb.href = `https://www.imdb.com/title/${encodeURIComponent(r.imdbID)}/`;
       el.finfo.hidden = false;
     } catch (e) { /* no card; the folder list still works */ }
+  }
+
+  // Podcasts, music...: the folder's cover image in the player, no IMDb lookup.
+  function showCoverInfo() {
+    const cover = folderCover(files);
+    el.info.hidden = !cover;
+    if (!cover) return;
+    setPoster(el.poster, cover);
+    el.infoTitle.textContent = stack[stack.length - 1].name;
+    el.infoMeta.textContent = ''; el.infoPlot.textContent = '';
   }
 
   async function loadInfo(f) {
@@ -415,8 +447,9 @@
       const r = await api(`/files/${f.id}/url`);
       f.direct = r.url;
       el.download.href = dlUrl(f);
-      el.imdb.href = imdbSearchUrl(f);
-      loadInfo(f);
+      const filmTv = isFilmTvSection();
+      el.imdb.hidden = !filmTv;
+      if (filmTv) { el.imdb.href = imdbSearchUrl(f); loadInfo(f); } else showCoverInfo();
       el.vlc.hidden = !/Android/i.test(navigator.userAgent);
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
@@ -430,7 +463,7 @@
     kinds = f.file_type === 'VIDEO' && canBufferAhead() ? ['hls', ...mp4, 'direct']
       : (native || f.file_type === 'AUDIO') ? ['direct', ...mp4, 'hls'] : [...mp4, 'hls', 'direct'];
     playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)}` : 'Ready');
-    if (f.file_type === 'VIDEO') loadSubtitles(f);
+    if (f.file_type === 'VIDEO' && isFilmTvSection()) loadSubtitles(f);
   }
 
   /* ---------- subtitles ---------- */
