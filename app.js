@@ -532,7 +532,15 @@
   }
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    // When an updated service worker takes over, reload once so the new version shows
+    // straight away. Skipped on first install (no previous controller) and mid-playback.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloaded || playerOpen) return;
+      reloaded = true; location.reload();
+    });
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
   }
 
   /* ---------- Connect with put.io (implicit OAuth flow) ---------- */
