@@ -1,10 +1,11 @@
 // App-shell cache only. API calls and video streams are never touched.
-const CACHE = 'resume-shell-v21';
-const SHELL = ['./', 'index.html', 'app.js', 'hls.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+// Bump CACHE on every release: that is what makes installed copies update.
+const CACHE = 'resume-shell-v22';
+const SHELL = ['./', 'index.html', 'app.js', 'hls.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
-  // cache: 'reload' skips the browser's HTTP cache (GitHub Pages sends max-age=600),
-  // so a new version never gets installed with stale copies of the files.
+  // Download the whole new version at once, skipping the browser's HTTP cache (GitHub
+  // Pages sends max-age=600), so a version is never a mix of old and new files.
   e.waitUntil(
     caches.open(CACHE)
       .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
@@ -24,21 +25,16 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
-  // Network first (revalidated, not served from the HTTP cache) so updates show on the
-  // next open; the cached copy is only used when offline.
+  // Cache first: the app opens instantly, also offline or on a weak signal. Updates come
+  // from the browser checking sw.js on each open; a new version installs in the
+  // background and the page reloads into it (see controllerchange in app.js).
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
-      try {
-        // Fetch by URL: a navigation Request can't be re-used with a RequestInit
-        // (that throws), which made page loads always fall back to the cache.
-        const res = await fetch(req.url, { cache: 'no-cache' });
-        if (res.ok) cache.put(req, res.clone());
-        return res;
-      } catch (err) {
-        const hit = await cache.match(req, { ignoreSearch: true });
-        if (hit) return hit;
-        throw err;
-      }
+      const hit = await cache.match(req, { ignoreSearch: true });
+      if (hit) return hit;
+      const res = await fetch(req.url, { cache: 'no-cache' });
+      if (res.ok) cache.put(req, res.clone());
+      return res;
     })
   );
 });
