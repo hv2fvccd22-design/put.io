@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v7';
+  const APP_VERSION = 'v8';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -164,7 +164,7 @@
         el.crumbs.appendChild(b);
       }
     });
-    el.title.textContent = stack[stack.length - 1].name === 'Files' ? 'Resume for put.io' : stack[stack.length - 1].name;
+    el.title.textContent = stack.length > 1 ? stack[stack.length - 1].name : '';
     el.back.hidden = stack.length < 2;
   }
 
@@ -503,7 +503,7 @@
     token = null; store.del(KEY_TOKEN);
     if (playerOpen) { el.video.pause(); el.video.removeAttribute('src'); el.video.load(); playerOpen = false; current = null; }
     stack = [{ id: 0, name: 'Files' }];
-    el.title.textContent = 'Resume for put.io';
+    el.title.textContent = '';
     el.loginMsg.textContent = msg || '';
     show('login');
   }
