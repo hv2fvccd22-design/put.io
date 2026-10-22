@@ -109,6 +109,7 @@
   video { width: 100%; max-height: 62vh; background: #000; border-radius: 10px; display: block; }
   .ptitle { font-size: 1.05rem; font-weight: 650; margin: 14px 0 4px; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .subsel { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 100%; min-width: 0; flex: 1 1 160px; }
   .toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; padding: 0 4px; }
   .toggle input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
   .status { margin-top: 12px; font-size: .875rem; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
@@ -159,6 +160,11 @@
         <button id="vlc" hidden>Open in VLC</button>
         <button id="mp4" hidden>Switch format</button>
         <label class="toggle small"><input type="checkbox" id="autoplay"> Auto-start</label>
+      </div>
+      <div id="subs" class="actions" hidden>
+        <label for="subsel" class="small muted" style="align-self:center">Subtitles</label>
+        <select id="subsel" class="subsel"></select>
+        <button id="subdl">Download .srt</button>
       </div>
       <div id="status" class="status" role="status"></div>
     </section>

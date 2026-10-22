@@ -16,6 +16,7 @@
     player: $('#player'), video: $('#video'), ptitle: $('#ptitle'),
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'),
+    subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
   };
 
   const store = {
@@ -252,9 +253,22 @@
   // put.io lists subtitles per file and serves them as WebVTT. They're fetched here
   // and attached as blob: tracks, so the video's own CC menu can turn them on.
   let subUrls = [];
+  let subList = [];   // [{ key, label, track }] for the open file
   function clearSubtitles() {
     el.video.querySelectorAll('track').forEach((t) => t.remove());
     subUrls.forEach((u) => URL.revokeObjectURL(u)); subUrls = [];
+    subList = []; el.subsel.innerHTML = ''; el.subs.hidden = true;
+  }
+  function subUrl(f, key, format) {
+    const u = new URL(`${API}/files/${f.id}/subtitles/${encodeURIComponent(key)}`);
+    u.searchParams.set('format', format);
+    u.searchParams.set('oauth_token', token);
+    return u.toString();
+  }
+  // The subtitle the picker points at; it follows whatever is switched on in the player.
+  function chosenSub() {
+    const showing = subList.find((s) => s.track && s.track.track.mode === 'showing');
+    return showing || subList[Number(el.subsel.value)] || null;
   }
   async function fetchText(url) {
     let res = await fetch(url);
@@ -272,10 +286,7 @@
     for (const s of list) {
       if (!current || current.id !== f.id) return; // moved on to another file
       try {
-        const u = new URL(`${API}/files/${f.id}/subtitles/${encodeURIComponent(s.key)}`);
-        u.searchParams.set('format', 'webvtt');
-        u.searchParams.set('oauth_token', token);
-        const vtt = await fetchText(u.toString());
+        const vtt = await fetchText(subUrl(f, s.key, 'webvtt'));
         const blobUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
         subUrls.push(blobUrl);
         const t = document.createElement('track');
@@ -283,9 +294,30 @@
         t.label = s.name || s.language || 'Subtitles';
         if (s.language_code && /^[a-z]{2,3}$/i.test(s.language_code)) t.srclang = s.language_code;
         el.video.appendChild(t);
+        const idx = subList.push({ key: s.key, label: t.label, track: t }) - 1;
+        const o = document.createElement('option'); o.value = String(idx); o.textContent = t.label;
+        el.subsel.appendChild(o);
+        el.subs.hidden = false;
       } catch (e) { /* skip this track */ }
     }
   }
+  el.video.textTracks.addEventListener('change', () => {
+    const i = subList.findIndex((s) => s.track && s.track.track.mode === 'showing');
+    if (i >= 0) el.subsel.value = String(i);
+  });
+  el.subdl.addEventListener('click', async () => {
+    const s = chosenSub(); if (!current || !s) return;
+    try {
+      const srt = await fetchText(subUrl(current, s.key, 'srt'));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([srt], { type: 'application/x-subrip' }));
+      const base = current.name.replace(/\.[^.]+$/, '');
+      const lang = (s.track && s.track.srclang) ? '.' + s.track.srclang : '';
+      a.download = `${base}${lang}.srt`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    } catch (e) { setStatus(`Could not download the subtitles (${e.message}).`, 'warn'); }
+  });
 
   /* ---------- formats: direct file, put.io MP4 conversion, or HLS stream ---------- */
   let hls = null, kinds = [], kindIdx = 0;
@@ -388,7 +420,9 @@
     const u = new URL(current.direct);
     const intent = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=${u.protocol.slice(0, -1)};` +
       `package=org.videolan.vlc;type=video/*;l.position=${startSecs * 1000};` +
-      `S.title=${encodeURIComponent(current.name)};end`;
+      `S.title=${encodeURIComponent(current.name)};` +
+      (chosenSub() ? `S.subtitles_location=${encodeURIComponent(subUrl(current, chosenSub().key, 'srt'))};` : '') +
+      'end';
     setStatus('Opening VLC. If nothing happens, VLC may not be installed.');
     location.href = intent;
   });
