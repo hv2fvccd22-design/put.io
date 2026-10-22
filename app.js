@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v22';
+  const APP_VERSION = 'v23';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -519,6 +519,8 @@
     kinds = f.file_type === 'VIDEO' && canBufferAhead() ? ['hls', ...mp4, 'direct']
       : (native || f.file_type === 'AUDIO') ? ['direct', ...mp4, 'hls'] : [...mp4, 'hls', 'direct'];
     playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)}` : 'Ready');
+    stopAudioDownload();
+    if (f.file_type === 'AUDIO' && el.bufahead.checked) downloadAudio(f);
     if (f.file_type === 'VIDEO' && isFilmTvSection()) loadSubtitles(f);
   }
 
@@ -666,8 +668,71 @@
     }
     el.bufbar.querySelector('.played').style.width = pct(v.currentTime);
   }
+  /* ---------- audio: download the whole file while it plays ---------- */
+  // put.io's download servers allow this page (CORS, Range), so the file is fetched in
+  // the background, resuming after drops, then playback moves to the local copy.
+  let dl = null; // { id, ctrl, url, pct, done }
+  function stopAudioDownload() {
+    if (!dl) return;
+    if (dl.ctrl) dl.ctrl.abort();
+    if (dl.url) URL.revokeObjectURL(dl.url);
+    dl = null;
+  }
+  async function downloadAudio(f) {
+    const me = { id: f.id, ctrl: null, url: null, pct: 0, done: false };
+    dl = me;
+    const chunks = []; let got = 0, total = 0, type = 'audio/mpeg';
+    const live = () => dl === me && current && current.id === f.id;
+    while (live() && !me.done) {
+      try {
+        me.ctrl = new AbortController();
+        const res = await fetch(f.direct, { headers: got ? { Range: `bytes=${got}-` } : {}, signal: me.ctrl.signal });
+        if (!(res.ok || res.status === 206) || !res.body) throw new Error('HTTP ' + res.status);
+        if (got && res.status !== 206) { chunks.length = 0; got = 0; } // server ignored the range: start over
+        type = res.headers.get('content-type') || type;
+        const range = /\/(\d+)$/.exec(res.headers.get('content-range') || '');
+        total = range ? Number(range[1]) : (Number(res.headers.get('content-length')) || 0) + got;
+        const reader = res.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value); got += value.length;
+          me.pct = total ? Math.floor((got / total) * 100) : 0;
+          showBuffered();
+        }
+        if (!total || got >= total) me.done = true;
+      } catch (e) {
+        if (!live()) return;
+        if (e.name === 'AbortError') return;
+        showBuffered();
+        await new Promise((r) => setTimeout(r, 5000)); // signal dropped: wait, then resume from `got`
+        if (f.direct && (await refreshDirect(f)) === false) return;
+      }
+    }
+    if (!live()) return;
+    // Swap the player to the downloaded copy at the same spot, keeping play/pause.
+    me.url = URL.createObjectURL(new Blob(chunks, { type }));
+    chunks.length = 0;
+    const v = el.video, t = v.currentTime, wasPlaying = !v.paused && !v.ended;
+    if (t > MIN_SAVE_SECONDS) current.start_from = Math.floor(t);
+    destroyHls();
+    v.src = me.url;
+    if (wasPlaying) v.play().catch(() => {});
+    showBuffered();
+  }
+  // The direct link can expire during a long outage; ask put.io for a fresh one.
+  async function refreshDirect(f) {
+    try { const r = await api(`/files/${f.id}/url`); if (r && r.url) f.direct = r.url; return true; }
+    catch (e) { return !e.auth; }
+  }
+
   function showBuffered() {
     drawBufBar();
+    if (dl && playerOpen && current && dl.id === current.id) {
+      el.buf.hidden = false;
+      el.buf.textContent = dl.url ? 'Fully downloaded: safe without signal' : `Downloading for offline: ${dl.pct}%`;
+      return;
+    }
     const on = !!hls && el.bufahead.checked && playerOpen;
     el.buf.hidden = !on;
     if (!on) return;
@@ -750,6 +815,7 @@
   async function closePlayer() {
     if (!playerOpen) return;
     await saveNow(false);
+    stopAudioDownload();
     el.video.pause(); destroyHls(); clearSubtitles();
     el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load();
     const f = files.find((x) => current && x.id === current.id);
@@ -812,6 +878,7 @@
 
   function logout(msg) {
     token = null; store.del(KEY_TOKEN);
+    stopAudioDownload();
     if (playerOpen) { el.video.pause(); el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load(); playerOpen = false; current = null; }
     stack = [{ id: 0, name: 'Files' }];
     setTitle('');
