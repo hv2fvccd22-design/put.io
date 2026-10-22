@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v24';
+  const APP_VERSION = 'v25';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -388,7 +388,10 @@
     if (posterOk(url)) { img.src = url; img.hidden = false; }
     else { img.hidden = true; img.removeAttribute('src'); }
     // The player's own poster too: stays up for audio, shows until a video starts.
-    if (img === el.poster) { if (posterOk(url)) el.video.poster = url; else el.video.removeAttribute('poster'); }
+    if (img === el.poster) {
+      if (posterOk(url)) el.video.poster = url; else el.video.removeAttribute('poster');
+      setMediaSession({ art: posterOk(url) ? url : '' });
+    }
   }
 
   // IMDb and put.io subtitles only make sense under the Movies / TV Shows top-level
@@ -460,6 +463,7 @@
       if (!current || current.id !== f.id) return;
       const src = ep || main;
       el.infoTitle.textContent = ep ? `${main.Title}: S${p.season}E${p.episode} ${na(ep.Title)}` : `${main.Title} (${na(main.Year)})`;
+      setMediaSession({ title: ep ? `S${p.season}E${p.episode} ${na(ep.Title)}`.trim() : main.Title, artist: ep ? main.Title : na(main.Year) });
       fillMeta(el.infoMeta, na(src.imdbRating) || na(main.imdbRating), [na(src.Runtime), na(main.Genre)].filter(Boolean));
       el.infoPlot.textContent = na(src.Plot) || na(main.Plot);
       setPoster(el.poster, na(src.Poster) || na(main.Poster));
@@ -499,6 +503,7 @@
     show('player');
     setTitle('');
     el.next.hidden = !nextFile();
+    setMediaSession({ title: f.name.replace(/\.[a-z0-9]{2,4}$/i, ''), artist: showFolderTitle() || stack[stack.length - 1].name, art: '' });
     el.ptitle.textContent = f.name;
     el.mp4.hidden = true;
     destroyHls();
@@ -794,11 +799,34 @@
     if (n && current.id === id) { openFile(n, { next: true }); return; }
     setStatus('Finished. Position cleared.');
   });
-  el.next.addEventListener('click', async () => {
+  async function playNext() {
     const n = nextFile(); if (!n) return;
     await saveNow(false);
     openFile(n, { next: true });
-  });
+  }
+  el.next.addEventListener('click', playNext);
+
+  /* ---------- lock screen / notification (Media Session) ---------- */
+  // What the phone shows while playing: title, the folder or show as the second line,
+  // and the cover/poster as the picture (the app icon until one is known).
+  const ms = { title: '', artist: '', art: '' };
+  function setMediaSession(p) {
+    if (!('mediaSession' in navigator) || !window.MediaMetadata) return;
+    Object.assign(ms, p);
+    const artwork = ms.art
+      ? [{ src: ms.art, sizes: '512x512', type: 'image/jpeg' }]
+      : [{ src: new URL('icon-512.png', location.href).href, sizes: '512x512', type: 'image/png' }];
+    try { navigator.mediaSession.metadata = new MediaMetadata({ title: ms.title, artist: ms.artist, artwork }); } catch (e) { /* unsupported */ }
+  }
+  if ('mediaSession' in navigator) {
+    const on = (action, fn) => { try { navigator.mediaSession.setActionHandler(action, fn); } catch (e) { /* unsupported */ } };
+    on('play', () => el.video.play().catch(() => {}));
+    on('pause', () => el.video.pause());
+    on('seekbackward', (d) => { el.video.currentTime = Math.max(0, el.video.currentTime - ((d && d.seekOffset) || 15)); });
+    on('seekforward', (d) => { el.video.currentTime = Math.min(el.video.duration || Infinity, el.video.currentTime + ((d && d.seekOffset) || 30)); });
+    on('seekto', (d) => { if (d && d.seekTime != null) el.video.currentTime = d.seekTime; });
+    on('nexttrack', () => { if (nextFile()) playNext(); });
+  }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(true); });
   window.addEventListener('pagehide', () => saveNow(true));
   window.addEventListener('online', flushPending);
