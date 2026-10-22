@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v16';
+  const APP_VERSION = 'v17';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -450,7 +450,7 @@
       const filmTv = isFilmTvSection();
       el.imdb.hidden = !filmTv;
       if (filmTv) { el.imdb.href = imdbSearchUrl(f); loadInfo(f); } else showCoverInfo();
-      el.vlc.hidden = !/Android/i.test(navigator.userAgent);
+      el.vlc.hidden = true; // Open in VLC button turned off; formats fall back automatically instead
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
       setStatus(`Could not get a stream link (${e.message}).`, 'bad');
@@ -571,7 +571,7 @@
     } else {
       v.src = src;
     }
-    el.mp4.hidden = kinds.length < 2;
+    el.mp4.hidden = true; // format switch button turned off; nextKind() still falls back on errors
     el.mp4.textContent = `Format: ${KIND_LABEL[kind]}. Switch`;
     if (el.autoplay.checked || wasPlaying) {
       setStatus(`${note ? note + '. ' : ''}Playing ${KIND_LABEL[kind]}`);
