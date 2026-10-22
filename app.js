@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v19';
+  const APP_VERSION = 'v20';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -343,9 +343,12 @@
     if (rating) { const st = document.createElement('span'); st.className = 'star'; st.textContent = `★ ${rating}`; metaEl.append(st, parts.length ? ' · ' : ''); }
     metaEl.append(parts.join(' · '));
   }
+  const posterOk = (url) => !!url && (url.startsWith('https://m.media-amazon.com/') || url.startsWith('https://api.put.io/'));
   function setPoster(img, url) {
-    if (url && (url.startsWith('https://m.media-amazon.com/') || url.startsWith('https://api.put.io/'))) { img.src = url; img.hidden = false; }
+    if (posterOk(url)) { img.src = url; img.hidden = false; }
     else { img.hidden = true; img.removeAttribute('src'); }
+    // The player's own poster too: stays up for audio, shows until a video starts.
+    if (img === el.poster) { if (posterOk(url)) el.video.poster = url; else el.video.removeAttribute('poster'); }
   }
 
   // IMDb and put.io subtitles only make sense under the Movies / TV Shows top-level
@@ -448,6 +451,7 @@
     el.mp4.hidden = true;
     destroyHls();
     clearSubtitles();
+    el.video.removeAttribute('poster');
     setStatus('Loading…');
 
     let start = pending[f.id] != null ? pending[f.id] : (f.start_from || 0);
@@ -711,7 +715,7 @@
     if (!playerOpen) return;
     await saveNow(false);
     el.video.pause(); destroyHls(); clearSubtitles();
-    el.video.removeAttribute('src'); el.video.load();
+    el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load();
     const f = files.find((x) => current && x.id === current.id);
     if (f && current) f.start_from = current.start_from;
     playerOpen = false; current = null;
@@ -772,7 +776,7 @@
 
   function logout(msg) {
     token = null; store.del(KEY_TOKEN);
-    if (playerOpen) { el.video.pause(); el.video.removeAttribute('src'); el.video.load(); playerOpen = false; current = null; }
+    if (playerOpen) { el.video.pause(); el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load(); playerOpen = false; current = null; }
     stack = [{ id: 0, name: 'Files' }];
     setTitle('');
     el.loginMsg.textContent = msg || '';
