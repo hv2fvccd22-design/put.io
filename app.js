@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v10';
+  const APP_VERSION = 'v11';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -19,7 +19,7 @@
     player: $('#player'), video: $('#video'), ptitle: $('#ptitle'),
     restart: $('#restart'), download: $('#download'), mp4: $('#mp4'), vlc: $('#vlc'), status: $('#status'),
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
-    bufahead: $('#bufahead'), buf: $('#buf'),
+    bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
   };
 
@@ -391,10 +391,27 @@
   }
   el.video.addEventListener('error', () => { if (current && playerOpen) nextKind('Could not play this format'); });
 
-  // How much is loaded ahead of the playhead, shown while buffer-ahead is in use.
-  el.video.addEventListener('progress', showBuffered);
-  el.video.addEventListener('timeupdate', showBuffered);
+  // Bar under the video: watched part in white, buffered ranges in yellow, so the
+  // yellow past the white edge is what's loaded ahead of the current position.
+  // Plus how much is loaded ahead, shown as text while buffer-ahead is in use.
+  ['progress', 'timeupdate', 'seeking', 'durationchange', 'emptied'].forEach((ev) => el.video.addEventListener(ev, showBuffered));
+  function drawBufBar() {
+    const v = el.video, d = v.duration;
+    el.bufbar.hidden = !playerOpen || !isFinite(d) || d <= 0;
+    if (el.bufbar.hidden) return;
+    const pct = (s) => `${Math.max(0, Math.min(100, (s / d) * 100))}%`;
+    const box = el.bufbar.querySelector('.ranges');
+    box.innerHTML = '';
+    for (let i = 0; i < v.buffered.length; i++) {
+      const r = document.createElement('div');
+      r.style.left = pct(v.buffered.start(i));
+      r.style.width = pct(v.buffered.end(i) - v.buffered.start(i));
+      box.appendChild(r);
+    }
+    el.bufbar.querySelector('.played').style.width = pct(v.currentTime);
+  }
   function showBuffered() {
+    drawBufBar();
     const on = !!hls && el.bufahead.checked && playerOpen;
     el.buf.hidden = !on;
     if (!on) return;
