@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v41';
+  const APP_VERSION = 'v42';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -11,6 +11,7 @@
   const KEY_HIDENP = 'resume.hidenp';
   const KEY_PLAYNEXT = 'resume.playnext';
   const KEY_GRID = 'resume.grid';
+  const KEY_FLATTEN = 'resume.flatten';
   const KEY_AUTOFS = 'resume.autofs';
   const KEY_FILLFS = 'resume.fillfs';
   const KEY_OMDB = 'resume.omdbkey';
@@ -30,7 +31,7 @@
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
     rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'),
     save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'),
-    dlbtn: $('#dlbtn'), downloads: $('#downloads'),
+    dlbtn: $('#dlbtn'), downloads: $('#downloads'), flatten: $('#flatten'),
     upcoming: $('#upcoming'), upList: $('#up-list'),
     menubtn: $('#menubtn'), menu: $('#menu'), searchbtn: $('#searchbtn'), searchbar: $('#searchbar'), q: $('#q'), autofs: $('#autofs'), fillfs: $('#fillfs'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
@@ -86,6 +87,12 @@
     if (!o) return;
     if (document.fullscreenElement === el.video) { if (o.lock) o.lock('landscape').catch(() => {}); }
     else if (o.unlock) { try { o.unlock(); } catch (e) { /* ignore */ } }
+  });
+  // One episode list per show instead of season folders: on unless switched off.
+  el.flatten.checked = store.get(KEY_FLATTEN) !== 'off';
+  el.flatten.addEventListener('change', () => {
+    store.set(KEY_FLATTEN, el.flatten.checked ? 'on' : 'off');
+    if (!playerOpen && stack.length > 1) loadFolder(stack[stack.length - 1].id);
   });
   // Play next: on unless switched off.
   el.playnext.checked = store.get(KEY_PLAYNEXT) !== 'off';
@@ -609,6 +616,28 @@
   }
 
   /* ---------- browsing ---------- */
+  // A show folder in TV Shows (Files / TV Shows / <show>): pull the episodes out of its season
+  // folders and bulk-season packs into one list, sorted by season and episode, each tagged with
+  // a season heading. Subtitle/sample/extras folders are skipped. Returns true if it flattened.
+  const isTvSection = () => stack.length > 1 && /^(tv( shows?)?|series)$/i.test(stack[1].name.trim());
+  async function flattenShow(id) {
+    if (!el.flatten.checked || stack.length !== 3 || !isTvSection() || stack[2].id !== id) return false;
+    const subs = files.filter((f) => f.file_type === 'FOLDER' && !/^(subs?|subtitles?|samples?|extras?|featurettes?|bonus)$/i.test(f.name.trim()));
+    if (!subs.length) return false;
+    const lists = await pool(subs, 3, async (d) => {
+      try { return ((await api('/files/list', { params: { parent_id: d.id, per_page: 1000 } })).files || []).map((f) => ({ ...f, _from: d.name })); }
+      catch (e) { return []; }
+    });
+    const loose = files.filter((f) => f.file_type !== 'FOLDER');
+    const eps = lists.flat().filter((f) => f.file_type !== 'FOLDER');
+    const seasonOf = (f) => { const p = parseRelease(f.name); if (p.season != null) return p.season; const m = /season\s*(\d+)|\bS(\d{1,2})\b/i.exec(f._from || ''); return m ? Number(m[1] || m[2]) : null; };
+    const all = [...loose, ...eps].map((f) => { const s = seasonOf(f); return { ...f, _season: s, _group: s != null ? `Season ${s}` : (f._from || '') }; });
+    all.sort((a, b) => ((a._season ?? 999) - (b._season ?? 999)) || ((parseRelease(a.name).episode ?? 999) - (parseRelease(b.name).episode ?? 999))
+      || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    files = all;
+    return true;
+  }
+
   async function loadFolder(id) {
     el.list.innerHTML = '<div class="empty">Loading&hellip;</div>';
     try {
@@ -617,6 +646,7 @@
         const fa = a.file_type === 'FOLDER' ? 0 : 1, fb = b.file_type === 'FOLDER' ? 0 : 1;
         return fa - fb || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
       });
+      if (await flattenShow(id)) { if (stack[stack.length - 1].id !== id) return; }
       // Main screen only: keep just the folders ticked in Settings (none ticked = show all).
       const picked = rootPicks();
       if (id === 0 && picked.size) {
@@ -775,8 +805,16 @@
       el.list.appendChild(d); return;
     }
     if (gridMode()) { renderGrid(hide); return; }
+    let lastGroup = null;
+    const groups = new Set(files.filter((f) => !hide || isPlayable(f)).map((f) => f._group || ''));
     files.forEach((f, i) => {
       if (hide && f.file_type !== 'FOLDER' && !isPlayable(f)) return;
+      // Season headings in a flattened show (only when there's more than one group).
+      if (f._group !== undefined && groups.size > 1 && f._group !== lastGroup) {
+        lastGroup = f._group;
+        const g = document.createElement('div'); g.className = 'grouphdr'; g.textContent = f._group || 'Other';
+        el.list.appendChild(g);
+      }
       const row = document.createElement('button');
       row.type = 'button'; row.className = 'row'; row.dataset.index = String(i);
       const k = kindIcon(f);
