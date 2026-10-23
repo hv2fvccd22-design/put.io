@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v39';
+  const APP_VERSION = 'v40';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -366,7 +366,7 @@
     results.forEach((f, i) => {
       const row = document.createElement('button');
       row.type = 'button'; row.className = 'row'; row.dataset.result = String(i);
-      const k = document.createElement('span'); k.className = 'kind' + (f.file_type === 'VIDEO' ? ' vid' : ''); k.textContent = kindLabel(f.file_type);
+      const k = kindIcon(f);
       const n = document.createElement('span'); n.className = 'name'; n.textContent = f.name;
       const m = document.createElement('span'); m.className = 'meta'; m.textContent = f.file_type === 'FOLDER' ? '' : fmtSize(f.size);
       row.append(k, n, m);
@@ -484,6 +484,39 @@
     let i = 0, n = b;
     while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
     return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+  }
+  // Line icons instead of DIR / VID / AUD badges (stroke = currentColor, so they follow the theme).
+  const ICONS = {
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    tv: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="m9 3 3 3 3-3M8 21h8"/>',
+    popcorn: '<path d="M6 10h12l-1.6 11H7.6z"/><path d="M10 10l.4 11M14 10l-.4 11"/><path d="M6 10a2.4 2.4 0 0 1 .8-4.6 3 3 0 0 1 5.2-1.8 3 3 0 0 1 5.2 1.8A2.4 2.4 0 0 1 18 10"/>',
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/>',
+    music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+    headphones: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/>',
+    play: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-9 9"/>',
+    doc: '<path d="M7 3h7l5 5v13H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+    box: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+    file: '<path d="M7 3h7l5 5v13H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/>',
+  };
+  function iconName(f) {
+    if (f.file_type === 'FOLDER') {
+      const n = f.name.trim();
+      if (/^(tv( shows?)?|series)$/i.test(n)) return 'tv';
+      if (/^(movies?|films?)$/i.test(n)) return 'popcorn';
+      if (/podcast/i.test(n)) return 'mic';
+      if (/audio ?books?/i.test(n)) return 'headphones';
+      if (/music|soundcloud|tracks/i.test(n)) return 'music';
+      return 'folder';
+    }
+    return ({ VIDEO: 'play', AUDIO: 'music', IMAGE: 'image', PDF: 'doc', TEXT: 'doc', ARCHIVE: 'box' })[f.file_type] || 'file';
+  }
+  function kindIcon(f) {
+    const k = document.createElement('span'), name = iconName(f);
+    k.className = 'kind' + (f.file_type === 'VIDEO' ? ' vid' : '') + (f.file_type === 'FOLDER' ? ' folder' : '');
+    k.setAttribute('aria-label', kindLabel(f.file_type)); k.title = kindLabel(f.file_type);
+    k.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+    return k;
   }
   function kindLabel(t) {
     return ({ FOLDER: 'DIR', VIDEO: 'VID', AUDIO: 'AUD', IMAGE: 'IMG', PDF: 'PDF', TEXT: 'TXT', ARCHIVE: 'ZIP' })[t] || 'FILE';
@@ -747,7 +780,7 @@
       if (hide && f.file_type !== 'FOLDER' && !isPlayable(f)) return;
       const row = document.createElement('button');
       row.type = 'button'; row.className = 'row'; row.dataset.index = String(i);
-      const k = document.createElement('span'); k.className = 'kind' + (f.file_type === 'VIDEO' ? ' vid' : ''); k.textContent = kindLabel(f.file_type);
+      const k = kindIcon(f);
       const n = document.createElement('span'); n.className = 'name'; n.textContent = f.name;
       const sv = offSupported && offMeta()[f.id];
       if (sv) { const s = document.createElement('span'); s.className = 'saved'; s.textContent = sv.done ? '⤓ saved' : '⤓ saving'; n.appendChild(s); }
