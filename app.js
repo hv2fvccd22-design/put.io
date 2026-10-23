@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v33';
+  const APP_VERSION = 'v34';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -121,6 +121,7 @@
     el.menubtn.setAttribute('aria-expanded', String(open));
   }
   el.menubtn.addEventListener('click', () => toggleMenu(el.menu.hidden));
+  el.menu.addEventListener('click', (e) => { if (e.target.closest('a.menuitem')) toggleMenu(false); });
   $('#m-settings').addEventListener('click', () => { toggleMenu(false); if (el.settings.hidden) el.cog.click(); });
   $('#m-signout').addEventListener('click', () => { toggleMenu(false); logout(''); });
   $('#m-home').addEventListener('click', async () => {

@@ -141,6 +141,8 @@
   .menu { display: flex; flex-direction: column; padding: 6px; margin-bottom: 14px; }
   .menuitem { background: none; border: 0; text-align: left; padding: 12px 14px; border-radius: 8px; justify-content: flex-start; }
   .menuitem:hover { background: var(--surface-2); }
+  a.menuitem { color: var(--fg); text-decoration: none; display: flex; }
+  .menusep { border: 0; border-top: 1px solid var(--line); margin: 4px 8px; }
   .searchbar { margin-bottom: 12px; }
   .searchbar input { width: 100%; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 11px 16px; }
   .where { display: block; color: var(--muted); font-size: .75rem; }
@@ -176,6 +178,10 @@
   <nav id="menu" class="card menu" hidden aria-label="Menu">
     <button type="button" class="menuitem" id="m-home">Home</button>
     <button type="button" class="menuitem" id="m-settings">Settings</button>
+    <hr class="menusep">
+    <a class="menuitem" href="https://showrss.info/" target="_blank" rel="noopener noreferrer">showRSS &#8599;</a>
+    <a class="menuitem" href="https://putflix.app/" target="_blank" rel="noopener noreferrer">PutFlix &#8599;</a>
+    <hr class="menusep">
     <button type="button" class="menuitem" id="m-signout">Sign out</button>
   </nav>
   <div id="searchbar" class="searchbar" hidden>
