@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v36';
+  const APP_VERSION = 'v37';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -444,15 +444,29 @@
   }
 
   /* ---------- add a download (magnet / .torrent link) into this folder ---------- */
-  // Shown in Movies / TV Shows and every folder below them (a show, a season...).
+  // Shown in Movies / TV Shows and every folder below them (a show, a season...), which save
+  // into the folder you're in; and in the podcasts folder, which always saves into its
+  // "to_sort" folder so the server's sorter converts and files it.
+  const isPodcastSection = () => stack.length > 1 && /podcast/i.test(stack[1].name);
   let addFor = null;
   function updateAddBar() {
     const bar = $('#addbar'); if (!bar) return;
-    const show = !!token && !searching && stack.length >= 2 && isFilmTvSection();
+    const show = !!token && !searching && stack.length >= 2 && (isFilmTvSection() || isPodcastSection());
     bar.hidden = !show;
     const here = stack[stack.length - 1];
     if (addFor !== here.id) { addFor = here.id; $('#addform').hidden = true; $('#addmsg').textContent = ''; }
-    $('#addwhere').textContent = `Saves into: ${stack.slice(1).map((s) => s.name).join(' / ')}`;
+    $('#addwhere').textContent = isPodcastSection()
+      ? `Saves into: ${stack[1].name} / to_sort (the sorter converts and files it)`
+      : `Saves into: ${stack.slice(1).map((s) => s.name).join(' / ')}`;
+  }
+  // Where a pasted link goes: the podcasts "to_sort" folder, else the folder you're in.
+  async function addTarget() {
+    const here = stack[stack.length - 1];
+    if (!isPodcastSection()) return here;
+    if (here.name === 'to_sort') return here;
+    const r = await api('/files/list', { params: { parent_id: stack[1].id, per_page: 1000 } });
+    const ts = (r.files || []).find((f) => f.file_type === 'FOLDER' && f.name.toLowerCase() === 'to_sort');
+    return ts ? { id: ts.id, name: `${stack[1].name} / to_sort` } : here;
   }
   $('#addbtn').addEventListener('click', () => {
     const f = $('#addform'); f.hidden = !f.hidden;
@@ -461,10 +475,11 @@
   $('#addcancel').addEventListener('click', () => { $('#addform').hidden = true; });
   $('#addform').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const url = $('#addurl').value.trim(), msg = $('#addmsg'), folder = stack[stack.length - 1];
+    const url = $('#addurl').value.trim(), msg = $('#addmsg');
     if (!/^magnet:\?/i.test(url) && !/^https?:\/\//i.test(url)) { msg.className = 'bad'; msg.textContent = 'Paste a magnet link (magnet:?…) or a link to a .torrent file.'; return; }
     msg.className = ''; msg.textContent = 'Sending to put.io…';
     try {
+      const folder = await addTarget();
       const r = await api('/transfers/add', { method: 'POST', params: { url, save_parent_id: folder.id } });
       const t = (r && r.transfer) || {};
       const name = t.name || (/[?&]dn=([^&]+)/i.exec(url) ? decodeURIComponent(/[?&]dn=([^&]+)/i.exec(url)[1].replace(/\+/g, ' ')) : 'Download');
