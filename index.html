@@ -172,6 +172,8 @@
   .cw .tag { position: absolute; top: 6px; left: 6px; font-size: .65rem; font-weight: 700; background: rgba(0,0,0,.7); color: #fdce45; padding: 2px 6px; border-radius: 4px; }
   .cw .t1 { font-size: .85rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cw .t2 { font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px 12px; }
+  .hgrid .pc { flex: none; }
   .pc { flex: 0 0 116px; display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; position: relative; }
   .pc .pimg .pbar { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgba(0,0,0,.55); z-index: 1; }
   .pc .pimg .pbar i { display: block; height: 100%; background: #fdce45; }

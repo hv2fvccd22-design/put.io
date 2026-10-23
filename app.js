@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v46';
+  const APP_VERSION = 'v47';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -322,41 +322,29 @@
     if (g) openFile(g, { from: 'home' });
     else { show('browser'); renderCrumbs(); setStatus('That file is no longer in its folder.', 'warn'); }
   }
-  function row(title, items) {
-    const sec = document.createElement('section'); sec.className = 'hrow';
-    const h = document.createElement('h2'); h.textContent = title;
-    const sc = document.createElement('div'); sc.className = 'hscroll';
-    items.forEach((x) => sc.appendChild(x));
-    sec.append(h, sc); el.homeRows.appendChild(sec);
-    return sc;
-  }
-  let homeObs = null, homeLibs = null;
-  function posterTile(f, lib, cover) {
-    const p = parseRelease(f.name);
-    const t = document.createElement('button'); t.type = 'button'; t.className = 'tile';
-    const box = document.createElement('div'); box.className = 'pimg'; box.textContent = p.title || f.name;
-    if (cover && posterOk(cover)) box.appendChild(Object.assign(document.createElement('img'), { src: cover, alt: '', loading: 'lazy' }));
-    const nm = document.createElement('div'); nm.className = 'tname'; nm.textContent = p.title || f.name;
-    const meta = document.createElement('div'); meta.className = 'tmeta'; meta.textContent = p.year || '';
-    t.append(box, nm, meta);
-    if (!cover && lib.kind !== 'pod' && homeObs && p.title) { t.dataset.title = p.title; t.dataset.year = p.year; homeObs.observe(t); }
-    t.addEventListener('click', () => {
-      stack = [{ id: 0, name: 'Files' }, { id: lib.id, name: lib.name }, { id: f.id, name: f.name }];
-      history.pushState({ d: 3 }, '');
-      show('browser'); loadFolder(f.id); renderCrumbs();
-    });
-    return t;
-  }
+  let homeObs = null;
+  // Home = just Now playing: everything part-way through (films, TV, music, podcasts), newest first.
+  let homeLoaded = false;
   function renderHome() {
     el.homeRows.innerHTML = '';
     const cw = continueItems();
-    const vids = cw.filter((x) => x.file_type !== 'AUDIO'), auds = cw.filter((x) => x.file_type === 'AUDIO');
-    if (vids.length) row('Continue watching', vids.map(cwCard));
-    if (auds.length) row('Continue listening', auds.map(cwCard));
-    if (homeLibs) homeLibs.forEach((lib) => { if (lib.items.length) row(lib.title, lib.items.map((f) => posterTile(f, lib, f._cover))); });
-    if (!el.homeRows.children.length) el.homeRows.innerHTML = navigator.onLine
-      ? '<div class="empty">Loading your libraries&hellip;</div>'
-      : '<div class="empty"><strong>You\'re offline</strong><br><span class="small">Saved items are in Downloads.</span></div>';
+    if (cw.length) {
+      const sec = document.createElement('section'); sec.className = 'hrow';
+      const h = document.createElement('h2'); h.textContent = 'Now playing';
+      const g = document.createElement('div'); g.className = 'hgrid';
+      cw.forEach((it) => g.appendChild(cwCard(it)));
+      sec.append(h, g); el.homeRows.appendChild(sec);
+      return;
+    }
+    const d = document.createElement('div'); d.className = 'empty';
+    if (!navigator.onLine) d.innerHTML = '<strong>You\'re offline</strong><br><span class="small">Saved items are in Downloads.</span>';
+    else if (!homeLoaded) d.innerHTML = 'Checking what you\'re part-way through&hellip;';
+    else {
+      d.innerHTML = '<strong>Nothing playing</strong><br><span class="small">Anything you start (films, TV, music or podcasts) shows here until it\'s finished.</span><br>';
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'primary'; b.style.marginTop = '12px'; b.textContent = 'Go to Library';
+      b.addEventListener('click', goLibrary); d.appendChild(b);
+    }
+    el.homeRows.appendChild(d);
   }
   async function loadHome() {
     if (homeObs) homeObs.disconnect();
@@ -368,27 +356,14 @@
     try {
       const root = await api('/files/list', { params: { parent_id: 0, per_page: 1000 } });
       const picked = rootPicks();
-      const libs = (root.files || []).filter((f) => f.file_type === 'FOLDER' && (!picked.size || picked.has(f.id))).map((f) => {
-        const n = f.name.trim();
-        const kind = /^(tv( shows?)?|series)$/i.test(n) ? 'tv' : /^(movies?|films?)$/i.test(n) ? 'movie' : /podcast/i.test(n) ? 'pod' : null;
-        return kind && { id: f.id, name: f.name, kind, title: kind === 'pod' ? f.name : `Recently added in ${f.name}`, items: [] };
-      }).filter(Boolean).sort((a, b) => ['tv', 'movie', 'pod'].indexOf(a.kind) - ['tv', 'movie', 'pod'].indexOf(b.kind));
-      await pool(libs, 2, async (lib) => {
-        const r = await api('/files/list', { params: { parent_id: lib.id, per_page: 1000 } });
-        lib.items = (r.files || []).filter((f) => f.file_type === 'FOLDER' && f.name !== 'to_sort')
-          .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''))).slice(0, 15);
-        if (lib.kind === 'pod') await pool(lib.items, 3, async (f) => {
-          try { f._cover = folderCover(((await api('/files/list', { params: { parent_id: f.id, per_page: 200 } })).files) || []); } catch (e) { /* no cover */ }
-        });
-      });
-      homeLibs = libs;
       const scanLibs = (root.files || []).filter((f) => f.file_type === 'FOLDER' && (!picked.size || picked.has(f.id))
         && /^(tv( shows?)?|series|movies?|films?)$|podcast|music|audio ?books?/i.test(f.name.trim()))
         .map((f) => ({ id: f.id, name: f.name }));
-      scanProgress(scanLibs).then((more) => { if (more && !el.home.hidden) renderHome(); }).catch(() => {});
+      try { await scanProgress(scanLibs); } catch (e) { if (e.auth) throw e; }
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
     }
+    homeLoaded = true;
     if (el.home.hidden) return;
     renderHome();
     // Refresh positions from put.io (progress made on other devices), then redraw.
