@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v37';
+  const APP_VERSION = 'v38';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -31,6 +31,7 @@
     rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'),
     save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'),
     dlbtn: $('#dlbtn'), downloads: $('#downloads'),
+    upcoming: $('#upcoming'), upList: $('#up-list'),
     menubtn: $('#menubtn'), menu: $('#menu'), searchbtn: $('#searchbtn'), searchbar: $('#searchbar'), q: $('#q'), autofs: $('#autofs'), fillfs: $('#fillfs'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
@@ -132,11 +133,191 @@
     show('browser'); loadFolder(0); renderCrumbs();
   });
 
+  /* ---------- upcoming episodes (TVmaze: free, no key, allows web apps) ---------- */
+  // Followed = every show folder in your TV Shows folder (matched by name + year), plus any
+  // you follow by search, minus any you unfollow. Stored per device; lookups cached.
+  const TVM = 'https://api.tvmaze.com';
+  const KEY_FOLLOW = 'resume.follow';     // { extra: [{id, name}], muted: [id] }
+  const KEY_TVM = 'resume.tvmaze';        // { m: {query: {id, t}}, s: {id: {d, t}} }
+  const DAY = 86400000;
+  const followState = () => { try { const f = JSON.parse(store.get(KEY_FOLLOW) || '{}') || {}; return { extra: f.extra || [], muted: f.muted || [] }; } catch (e) { return { extra: [], muted: [] }; } };
+  const saveFollow = (f) => store.set(KEY_FOLLOW, JSON.stringify(f));
+  const tvmCache = () => { try { const c = JSON.parse(store.get(KEY_TVM) || '{}') || {}; return { m: c.m || {}, s: c.s || {} }; } catch (e) { return { m: {}, s: {} }; } };
+  function saveTvm(c) {
+    const ids = Object.keys(c.s);
+    if (ids.length > 150) ids.sort((a, b) => c.s[a].t - c.s[b].t).slice(0, ids.length - 150).forEach((k) => delete c.s[k]);
+    try { store.set(KEY_TVM, JSON.stringify(c)); } catch (e) { /* storage full: skip caching */ }
+  }
+  async function tvm(path) {
+    const r = await fetch(TVM + path);
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('TVmaze HTTP ' + r.status);
+    return r.json();
+  }
+  // Library folder name -> TVmaze show id (cached for 30 days, including "no match").
+  async function matchShow(folderName) {
+    const p = parseRelease(folderName), key = `${p.title}|${p.year}`.toLowerCase(), c = tvmCache();
+    if (c.m[key] && Date.now() - c.m[key].t < 30 * DAY) return c.m[key].id;
+    const res = (await tvm(`/search/shows?q=${encodeURIComponent(p.title)}`)) || [];
+    const pick = (p.year && res.find((x) => (x.show.premiered || '').startsWith(p.year))) || res[0];
+    const id = pick ? pick.show.id : null;
+    const c2 = tvmCache(); c2.m[key] = { id, t: Date.now() }; saveTvm(c2);
+    return id;
+  }
+  // Show + all its episodes (cached 12 h, so the page is quick and works offline).
+  async function showEpisodes(id) {
+    const c = tvmCache(), hit = c.s[id];
+    if (hit && (Date.now() - hit.t < 12 * 3600000 || !navigator.onLine)) return hit.d;
+    try {
+      const s = await tvm(`/shows/${id}?embed=episodes`);
+      if (!s) return null;
+      const eps = ((s._embedded && s._embedded.episodes) || []).map((e) => ({ s: e.season, n: e.number, name: e.name, at: e.airstamp || (e.airdate ? e.airdate + 'T12:00:00Z' : '') })).filter((e) => e.at);
+      const d = { id: s.id, name: s.name, status: s.status, img: s.image && (s.image.medium || s.image.original), eps };
+      const c2 = tvmCache(); c2.s[id] = { d, t: Date.now() }; saveTvm(c2);
+      return d;
+    } catch (e) { return hit ? hit.d : null; }
+  }
+  // Show folders inside the TV Shows top-level folder: [{id, name}].
+  async function libraryShows() {
+    const root = await api('/files/list', { params: { parent_id: 0, per_page: 1000 } });
+    const tv = (root.files || []).filter((f) => f.file_type === 'FOLDER' && /^(tv( shows?)?|series)$/i.test(f.name.trim()));
+    const out = [];
+    for (const t of tv) {
+      const r = await api('/files/list', { params: { parent_id: t.id, per_page: 1000 } });
+      (r.files || []).filter((f) => f.file_type === 'FOLDER').forEach((f) => out.push({ id: f.id, name: f.name, parent: t }));
+    }
+    return out;
+  }
+  async function pool(items, n, fn) {
+    const out = []; let i = 0;
+    await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]); } }));
+    return out;
+  }
+  let upShows = []; // [{tv, folder}] currently followed, for the manage list
+  async function openUpcoming() {
+    toggleMenu(false); closeSearch();
+    if (playerOpen) await closePlayer();
+    history.pushState({ d: stack.length, up: 1 }, '');
+    show('upcoming'); setTitle('Upcoming');
+    loadUpcoming();
+  }
+  $('#m-upcoming').addEventListener('click', openUpcoming);
+  async function loadUpcoming() {
+    el.upList.innerHTML = '<div class="empty">Checking your shows&hellip;</div>';
+    const fol = followState();
+    let lib = [];
+    try { lib = await libraryShows(); } catch (e) { if (e.auth) return logout('Your token was rejected. Connect again.'); }
+    const ids = await pool(lib, 3, async (f) => { try { return await matchShow(f.name); } catch (e) { return null; } });
+    const map = new Map(); // tvmaze id -> {folder}
+    lib.forEach((f, i) => { if (ids[i] && !map.has(ids[i])) map.set(ids[i], { folder: f }); });
+    fol.extra.forEach((x) => { if (!map.has(x.id)) map.set(x.id, { folder: null }); });
+    fol.muted.forEach((id) => map.delete(id));
+    const entries = [...map.entries()];
+    const shows = await pool(entries, 3, async ([id]) => showEpisodes(id));
+    upShows = entries.map(([, v], i) => ({ tv: shows[i], folder: v.folder })).filter((x) => x.tv);
+    renderUpcoming();
+    renderFollowing();
+  }
+  function whenText(d) {
+    const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / DAY);
+    return days === 0 ? 'today' : days === 1 ? 'tomorrow' : days === -1 ? 'yesterday' : days > 0 ? `in ${days} days` : `${-days} days ago`;
+  }
+  function dayLabel(d) {
+    const w = whenText(d);
+    if (w === 'today' || w === 'tomorrow' || w === 'yesterday') return w[0].toUpperCase() + w.slice(1);
+    return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+  function renderUpcoming() {
+    const now = Date.now(), start = new Date().setHours(0, 0, 0, 0);
+    const up = [], recent = [], noDate = [];
+    upShows.forEach(({ tv, folder }) => {
+      const future = tv.eps.filter((e) => Date.parse(e.at) >= start);
+      future.slice(0, 6).forEach((e) => up.push({ tv, folder, e }));
+      tv.eps.filter((e) => { const t = Date.parse(e.at); return t < start && t >= start - 7 * DAY; }).forEach((e) => recent.push({ tv, folder, e }));
+      if (!future.length && /running|in development/i.test(tv.status || '')) noDate.push({ tv, folder });
+    });
+    up.sort((a, b) => Date.parse(a.e.at) - Date.parse(b.e.at));
+    recent.sort((a, b) => Date.parse(b.e.at) - Date.parse(a.e.at));
+    el.upList.innerHTML = '';
+    if (!upShows.length) { el.upList.innerHTML = '<div class="empty">No followed shows yet. Shows in your TV Shows folder appear here automatically, or follow one below.</div>'; return; }
+    const head = (t) => { const h = document.createElement('div'); h.className = 'up-day'; h.textContent = t; el.upList.appendChild(h); };
+    const item = ({ tv, folder, e }, past) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'up-item' + (past ? ' past' : '');
+      const img = tv.img && posterOk(tv.img) ? Object.assign(document.createElement('img'), { src: tv.img, alt: '', loading: 'lazy' }) : Object.assign(document.createElement('div'), { className: 'noimg' });
+      const mid = document.createElement('div');
+      const s1 = document.createElement('div'); s1.className = 'ushow'; s1.textContent = tv.name;
+      const s2 = document.createElement('div'); s2.className = 'uep'; s2.textContent = e ? `S${e.s}E${e.n}${e.name && !/^episode \d+$/i.test(e.name) ? ' · ' + e.name : ''}` : (tv.status || '');
+      mid.append(s1, s2);
+      const w = document.createElement('div'); w.className = 'uwhen';
+      if (e) { const d = new Date(e.at); w.innerHTML = `<b>${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</b>`; w.append(whenText(d)); }
+      b.append(img, mid, w);
+      if (folder) b.addEventListener('click', () => openLibraryShow(folder));
+      else b.style.cursor = 'default';
+      el.upList.appendChild(b);
+    };
+    let last = '';
+    if (!up.length) head('Nothing scheduled yet');
+    up.forEach((x) => { const lbl = dayLabel(new Date(x.e.at)); if (lbl !== last) { head(lbl); last = lbl; } item(x); });
+    if (recent.length) { head('Aired this week'); recent.forEach((x) => item(x, true)); }
+    if (noDate.length) { head('No date yet'); noDate.forEach((x) => item({ ...x, e: null }, true)); }
+  }
+  function openLibraryShow(folder) {
+    stack = [{ id: 0, name: 'Files' }, { id: folder.parent.id, name: folder.parent.name }, { id: folder.id, name: folder.name }];
+    history.pushState({ d: stack.length }, '');
+    show('browser'); loadFolder(folder.id); renderCrumbs();
+  }
+  // Manage: unfollow / re-follow, and follow by search.
+  function renderFollowing() {
+    const box = $('#up-following'), fol = followState();
+    box.innerHTML = '';
+    const rows = upShows.map((x) => ({ id: x.tv.id, name: x.tv.name, on: true }))
+      .concat(fol.muted.map((id) => { const c = tvmCache().s[id]; return { id, name: c ? c.d.name : `Show ${id}`, on: false }; }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    rows.forEach((r) => {
+      const row = document.createElement('div'); row.className = 'up-row';
+      const n = document.createElement('span'); n.className = 'small'; n.textContent = r.name + (r.on ? '' : ' (unfollowed)');
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'ghost small';
+      btn.textContent = r.on ? 'Unfollow' : 'Follow'; btn.dataset.id = String(r.id); btn.dataset.name = r.name; btn.dataset.act = r.on ? 'mute' : 'unmute';
+      row.append(n, btn); box.appendChild(row);
+    });
+  }
+  function setFollow(id, name, act) {
+    const f = followState();
+    f.muted = f.muted.filter((x) => x !== id);
+    if (act === 'mute') { f.muted.push(id); f.extra = f.extra.filter((x) => x.id !== id); }
+    if (act === 'follow' && !f.extra.some((x) => x.id === id)) f.extra.push({ id, name });
+    saveFollow(f);
+    loadUpcoming();
+  }
+  $('#up-following').addEventListener('click', (e) => { const b = e.target.closest('button[data-act]'); if (b) setFollow(Number(b.dataset.id), b.dataset.name, b.dataset.act); });
+  let upSearchTimer = null;
+  $('#up-q').addEventListener('input', () => {
+    clearTimeout(upSearchTimer);
+    upSearchTimer = setTimeout(async () => {
+      const q = $('#up-q').value.trim(), box = $('#up-results');
+      if (q.length < 2) { box.innerHTML = ''; return; }
+      try {
+        const res = (await tvm(`/search/shows?q=${encodeURIComponent(q)}`)) || [];
+        box.innerHTML = '';
+        res.slice(0, 8).forEach(({ show: s }) => {
+          const row = document.createElement('div'); row.className = 'up-row';
+          const n = document.createElement('span'); n.className = 'small';
+          n.textContent = `${s.name}${s.premiered ? ` (${s.premiered.slice(0, 4)})` : ''}${s.status ? ' · ' + s.status : ''}`;
+          const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'small'; btn.textContent = 'Follow';
+          btn.addEventListener('click', () => { $('#up-q').value = ''; box.innerHTML = ''; setFollow(s.id, s.name, 'follow'); });
+          row.append(n, btn); box.appendChild(row);
+        });
+        if (!res.length) box.innerHTML = '<span class="small muted">No shows found.</span>';
+      } catch (e) { box.innerHTML = `<span class="small err">Search failed (${e.message}).</span>`; }
+    }, 350);
+  });
+
   /* ---------- search (whole put.io account) ---------- */
   let searching = false, results = [], searchSeq = 0, searchTimer = null;
   function openSearch() {
     toggleMenu(false); toggleSettings(false); toggleDownloads(false);
     if (playerOpen) return; // search from the folder screens
+    if (!el.upcoming.hidden) show('browser'); // results show in the folder view
     searching = true;
     $('#addbar').hidden = true;
     el.searchbar.hidden = false; el.searchbtn.setAttribute('aria-expanded', 'true');
@@ -313,6 +494,7 @@
     el.login.hidden = view !== 'login';
     el.browser.hidden = view !== 'browser';
     el.player.hidden = view !== 'player';
+    el.upcoming.hidden = view !== 'upcoming';
     // Settings and Sign out live in the ☰ menu now; their old header buttons stay hidden.
     el.signout.hidden = true;
     el.cog.hidden = true;
@@ -320,7 +502,7 @@
     el.searchbtn.hidden = view === 'login';
     el.dlbtn.hidden = view === 'login' || !offSupported;
     if (view === 'login') { toggleSettings(false); toggleDownloads(false); toggleMenu(false); closeSearch(); }
-    el.back.hidden = view !== 'player' && stack.length < 2;
+    el.back.hidden = view !== 'player' && view !== 'upcoming' && stack.length < 2;
   }
 
   /* ---------- put.io API ---------- */
@@ -646,7 +828,7 @@
     if (rating) { const st = document.createElement('span'); st.className = 'star'; st.textContent = `★ ${rating}`; metaEl.append(st, parts.length ? ' · ' : ''); }
     metaEl.append(parts.join(' · '));
   }
-  const posterOk = (url) => !!url && (url.startsWith('https://m.media-amazon.com/') || url.startsWith('https://api.put.io/'));
+  const posterOk = (url) => !!url && (url.startsWith('https://m.media-amazon.com/') || url.startsWith('https://api.put.io/') || url.startsWith('https://static.tvmaze.com/'));
   function setPoster(img, url) {
     if (posterOk(url)) { img.src = url; img.hidden = false; }
     else { img.hidden = true; img.removeAttribute('src'); }
@@ -1372,6 +1554,7 @@
   window.addEventListener('popstate', (e) => {
     if (searching) closeSearch();
     if (!token) return;
+    if (!el.upcoming.hidden && !(e.state && e.state.up)) { show('browser'); renderList(); return; }
     if (playerOpen && !(e.state && e.state.p)) { closePlayer(); return; }
     const target = (e.state && e.state.d) || 1;
     if (target !== stack.length) { stack.length = Math.max(1, Math.min(target, stack.length)); loadFolder(stack[stack.length - 1].id); renderCrumbs(); }

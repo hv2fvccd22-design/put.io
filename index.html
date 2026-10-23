@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>put.io</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://m.media-amazon.com https://api.put.io; connect-src https:; media-src https: blob:; worker-src 'self' blob:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://m.media-amazon.com https://api.put.io https://static.tvmaze.com; connect-src https:; media-src https: blob:; worker-src 'self' blob:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <script src="hls.min.js"></script>
 <meta name="theme-color" content="#0f1416">
@@ -145,6 +145,21 @@
   .menusep { border: 0; border-top: 1px solid var(--line); margin: 4px 8px; }
   .searchbar { margin-bottom: 12px; }
   .addbar { margin-bottom: 12px; }
+  .up-day { font-weight: 650; margin: 14px 0 4px; }
+  .up-day:first-child { margin-top: 0; }
+  .up-item { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left; width: 100%; }
+  .up-item img, .up-item .noimg { width: 46px; height: 64px; object-fit: cover; border-radius: 6px; background: var(--surface-2); display: block; }
+  .up-item .ushow { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .up-item .uep { font-size: .85rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .up-item .uwhen { text-align: right; font-size: .8rem; color: var(--muted); white-space: nowrap; }
+  .up-item .uwhen b { display: block; color: var(--fg); font-weight: 600; }
+  .up-item.past { opacity: .7; }
+  .up-manage { margin-top: 18px; }
+  .up-manage summary { cursor: pointer; font-weight: 600; }
+  .up-manage input { width: 100%; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .up-row { display: flex; align-items: center; gap: 8px; }
+  .up-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .up-row button { padding: 4px 10px; }
   .addform { margin-top: 10px; }
   .addform input { width: 100%; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
   #addmsg:not(:empty) { margin-top: 8px; }
@@ -183,6 +198,7 @@
   </header>
   <nav id="menu" class="card menu" hidden aria-label="Menu">
     <button type="button" class="menuitem" id="m-home">Home</button>
+    <button type="button" class="menuitem" id="m-upcoming">Upcoming episodes</button>
     <button type="button" class="menuitem" id="m-settings">Settings</button>
     <hr class="menusep">
     <a class="menuitem" href="https://showrss.info/" target="_blank" rel="noopener noreferrer">showRSS &#8599;</a>
@@ -266,6 +282,18 @@
         </div>
       </div>
       <div id="list" class="list" aria-live="polite"></div>
+    </section>
+
+    <section id="upcoming" hidden>
+      <div id="up-list" class="stack" style="gap:6px"></div>
+      <details id="up-manage" class="card up-manage">
+        <summary>Followed shows</summary>
+        <p class="small muted" style="margin:8px 0">Shows in your TV Shows folder are followed automatically. Unfollow any here, or follow another show:</p>
+        <input id="up-q" type="search" placeholder="Follow a show: search by name" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search for a show to follow">
+        <div id="up-results" class="stack" style="gap:6px;margin-top:8px"></div>
+        <div id="up-following" class="stack" style="gap:6px;margin-top:12px"></div>
+      </details>
+      <p class="small muted" style="text-align:center;margin-top:16px">Schedule from <a href="https://www.tvmaze.com/" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">TVmaze</a></p>
     </section>
 
     <section id="player" hidden>

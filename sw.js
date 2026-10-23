@@ -1,10 +1,10 @@
 // App-shell cache only. API calls and video streams are never touched.
 // Bump CACHE on every release: that is what makes installed copies update.
-const CACHE = 'resume-shell-v37';
+const CACHE = 'resume-shell-v38';
 // Artwork (podcast covers from put.io, IMDb posters) kept across app versions.
 const IMG_CACHE = 'resume-img';
 const IMG_MAX = 400;
-const isArtwork = (u) => u.hostname === 'm.media-amazon.com' || (u.hostname === 'api.put.io' && /^\/(screenshots|thumbnails)\//.test(u.pathname));
+const isArtwork = (u) => u.hostname === 'm.media-amazon.com' || u.hostname === 'static.tvmaze.com' || (u.hostname === 'api.put.io' && /^\/(screenshots|thumbnails)\//.test(u.pathname));
 const SHELL = ['./', 'index.html', 'app.js', 'hls.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
