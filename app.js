@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v38';
+  const APP_VERSION = 'v39';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -138,7 +138,7 @@
   // you follow by search, minus any you unfollow. Stored per device; lookups cached.
   const TVM = 'https://api.tvmaze.com';
   const KEY_FOLLOW = 'resume.follow';     // { extra: [{id, name}], muted: [id] }
-  const KEY_TVM = 'resume.tvmaze';        // { m: {query: {id, t}}, s: {id: {d, t}} }
+  const KEY_TVM = 'resume.tvmaze2';       // { m: {query: {id, t}}, s: {id: {d, t}} }
   const DAY = 86400000;
   const followState = () => { try { const f = JSON.parse(store.get(KEY_FOLLOW) || '{}') || {}; return { extra: f.extra || [], muted: f.muted || [] }; } catch (e) { return { extra: [], muted: [] }; } };
   const saveFollow = (f) => store.set(KEY_FOLLOW, JSON.stringify(f));
@@ -171,7 +171,9 @@
     try {
       const s = await tvm(`/shows/${id}?embed=episodes`);
       if (!s) return null;
-      const eps = ((s._embedded && s._embedded.episodes) || []).map((e) => ({ s: e.season, n: e.number, name: e.name, at: e.airstamp || (e.airdate ? e.airdate + 'T12:00:00Z' : '') })).filter((e) => e.at);
+      // Streaming shows have no air time: TVmaze then fills in 12:00 UTC, which isn't real,
+      // so keep `timed` to show the time only when it's known.
+      const eps = ((s._embedded && s._embedded.episodes) || []).map((e) => ({ s: e.season, n: e.number, name: e.name, at: e.airstamp || (e.airdate ? e.airdate + 'T12:00:00Z' : ''), timed: !!e.airtime })).filter((e) => e.at);
       const d = { id: s.id, name: s.name, status: s.status, img: s.image && (s.image.medium || s.image.original), eps };
       const c2 = tvmCache(); c2.s[id] = { d, t: Date.now() }; saveTvm(c2);
       return d;
@@ -249,7 +251,11 @@
       const s2 = document.createElement('div'); s2.className = 'uep'; s2.textContent = e ? `S${e.s}E${e.n}${e.name && !/^episode \d+$/i.test(e.name) ? ' · ' + e.name : ''}` : (tv.status || '');
       mid.append(s1, s2);
       const w = document.createElement('div'); w.className = 'uwhen';
-      if (e) { const d = new Date(e.at); w.innerHTML = `<b>${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</b>`; w.append(whenText(d)); }
+      if (e) {
+        const d = new Date(e.at);
+        w.innerHTML = `<b>${e.timed ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : (past ? 'Out' : 'Release day')}</b>`;
+        w.append(whenText(d));
+      }
       b.append(img, mid, w);
       if (folder) b.addEventListener('click', () => openLibraryShow(folder));
       else b.style.cursor = 'default';
