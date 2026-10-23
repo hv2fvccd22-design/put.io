@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v43';
+  const APP_VERSION = 'v44';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -171,6 +171,41 @@
     if (next && isPlayable(next) && it) upsertHist({ id: next.id, name: next.name, file_type: next.file_type, path: it.path, img: next.screenshot || '', art: it.art, at: Date.now(), pos: 0, finished: false, upnext: true });
   }
 
+  // Pick up things in progress that weren't started in this app on this device (older plays,
+  // put.io's own apps): look at the most recently updated folders in each library for files
+  // with a saved position. At most every 30 minutes.
+  const KEY_SCAN = 'resume.progscan';
+  async function scanProgress(libs) {
+    if (Date.now() - Number(store.get(KEY_SCAN) || 0) < 30 * 60000) return false;
+    store.set(KEY_SCAN, String(Date.now()));
+    const known = new Set(hist().map((x) => x.id)), found = [];
+    const take = (list, path) => list.forEach((f) => {
+      if (isPlayable(f) && (f.start_from || 0) > MIN_SAVE_SECONDS && !known.has(f.id)) {
+        known.add(f.id);
+        found.push({ id: f.id, name: f.name, file_type: f.file_type, path, img: f.screenshot || '', pos: f.start_from,
+          at: Date.parse((f.updated_at || f.created_at || '') + 'Z') || 0, finished: false, upnext: false });
+      }
+    });
+    const lst = async (id) => ((await api('/files/list', { params: { parent_id: id, per_page: 1000 } })).files) || [];
+    await pool(libs, 2, async (lib) => {
+      const kids = await lst(lib.id);
+      const folders = kids.filter((f) => f.file_type === 'FOLDER' && f.name !== 'to_sort')
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 8);
+      take(kids, [{ id: 0, name: 'Files' }, { id: lib.id, name: lib.name }]);
+      await pool(folders, 3, async (fd) => {
+        const base = [{ id: 0, name: 'Files' }, { id: lib.id, name: lib.name }, { id: fd.id, name: fd.name }];
+        const inside = await lst(fd.id);
+        take(inside, base);
+        // one level further (season folders / albums)
+        const subs = inside.filter((f) => f.file_type === 'FOLDER').slice(0, 6);
+        await pool(subs, 2, async (sd) => take(await lst(sd.id), [...base, { id: sd.id, name: sd.name }]));
+      });
+    });
+    if (!found.length) return false;
+    const h = hist(); found.forEach((x) => h.push(x)); saveHist(h.sort((a, b) => (b.at || 0) - (a.at || 0)));
+    return true;
+  }
+
   /* ---------- Home (Plex-style): Continue watching + Recently added rows ---------- */
   function goHome(push = true) {
     toggleMenu(false); toggleDownloads(false); toggleSettings(false); closeSearch();
@@ -192,7 +227,8 @@
     else if (t.dataset.tab === 'upcoming') openUpcoming();
     else if (t.dataset.tab === 'downloads') toggleDownloads(el.downloads.hidden);
   });
-  const continueItems = () => hist().filter((x) => !x.finished && (x.upnext || ((x.pos || 0) > MIN_SAVE_SECONDS && (!x.dur || x.pos < x.dur - 30)))).slice(0, 15);
+  const continueItems = () => hist().filter((x) => !x.finished && (x.upnext || ((x.pos || 0) > MIN_SAVE_SECONDS && (!x.dur || x.pos < x.dur - 30))))
+    .sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 24);
   function cwCard(it) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'cw';
     const th = document.createElement('div'); th.className = 'thumb' + (it.img ? '' : ' square');
@@ -203,8 +239,9 @@
     const p = parseRelease(it.name), show = (it.path[2] && it.path[2].name) || (it.path[it.path.length - 1] || {}).name || '';
     const t1 = document.createElement('div'); t1.className = 't1';
     const t2 = document.createElement('div'); t2.className = 't2';
-    if (p.season != null) { t1.textContent = parseRelease(show).title || p.title; t2.textContent = `S${p.season}E${p.episode}${it.dur && !it.upnext ? ' · ' + fmtTime(Math.max(0, it.dur - it.pos)) + ' left' : ''}`; }
-    else { t1.textContent = it.name.replace(/\.[a-z0-9]{2,4}$/i, ''); t2.textContent = (it.path[it.path.length - 1] || {}).name || ''; }
+    const where = it.upnext ? '' : it.dur ? ' · ' + fmtTime(Math.max(0, it.dur - it.pos)) + ' left' : it.pos ? ' · at ' + fmtTime(it.pos) : '';
+    if (p.season != null) { t1.textContent = parseRelease(show).title || p.title; t2.textContent = `S${p.season}E${p.episode}${where}`; }
+    else { t1.textContent = it.name.replace(/\.[a-z0-9]{2,4}$/i, ''); t2.textContent = ((it.path[it.path.length - 1] || {}).name || '') + where; }
     b.append(th, t1, t2);
     b.addEventListener('click', () => resumeItem(it));
     return b;
@@ -245,7 +282,9 @@
   function renderHome() {
     el.homeRows.innerHTML = '';
     const cw = continueItems();
-    if (cw.length) row('Continue watching', cw.map(cwCard));
+    const vids = cw.filter((x) => x.file_type !== 'AUDIO'), auds = cw.filter((x) => x.file_type === 'AUDIO');
+    if (vids.length) row('Continue watching', vids.map(cwCard));
+    if (auds.length) row('Continue listening', auds.map(cwCard));
     if (homeLibs) homeLibs.forEach((lib) => { if (lib.items.length) row(lib.title, lib.items.map((f) => posterTile(f, lib, f._cover))); });
     if (!el.homeRows.children.length) el.homeRows.innerHTML = navigator.onLine
       ? '<div class="empty">Loading your libraries&hellip;</div>'
@@ -275,6 +314,10 @@
         });
       });
       homeLibs = libs;
+      const scanLibs = (root.files || []).filter((f) => f.file_type === 'FOLDER' && (!picked.size || picked.has(f.id))
+        && /^(tv( shows?)?|series|movies?|films?)$|podcast|music|audio ?books?/i.test(f.name.trim()))
+        .map((f) => ({ id: f.id, name: f.name }));
+      scanProgress(scanLibs).then((more) => { if (more && !el.home.hidden) renderHome(); }).catch(() => {});
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
     }
