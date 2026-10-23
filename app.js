@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v28';
+  const APP_VERSION = 'v29';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -27,7 +27,8 @@
     autoplay: $('#autoplay'), cog: $('#cog'), settings: $('#settings'),
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
     rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'),
-    save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'), omdbkey: $('#omdbkey'),
+    save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'),
+    dlbtn: $('#dlbtn'), downloads: $('#downloads'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
@@ -49,6 +50,7 @@
   el.bufahead.addEventListener('change', () => store.set(KEY_BUFFER, el.bufahead.checked ? 'on' : 'off'));
   const canBufferAhead = () => el.bufahead.checked && !!(window.Hls && window.Hls.isSupported());
   function toggleSettings(open) {
+    if (open) toggleDownloads(false);
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
   }
@@ -75,8 +77,16 @@
   el.cog.addEventListener('click', () => {
     const open = el.settings.hidden;
     toggleSettings(open);
-    if (open) { loadRootDirs(); renderOffline(); }
+    if (open) loadRootDirs();
   });
+  // Offline downloads have their own panel (header ⤓ button).
+  function toggleDownloads(open) {
+    if (open) toggleSettings(false);
+    el.downloads.hidden = !open;
+    el.dlbtn.setAttribute('aria-expanded', String(open));
+    if (open) renderOffline();
+  }
+  el.dlbtn.addEventListener('click', () => toggleDownloads(el.downloads.hidden));
 
   // Which top-level folders the main screen shows, by put.io folder id.
   // Ticked top-level folders, in the order the main screen shows them (put.io folder ids).
@@ -182,7 +192,8 @@
     el.player.hidden = view !== 'player';
     el.signout.hidden = view === 'login';
     el.cog.hidden = view === 'login';
-    if (view === 'login') toggleSettings(false);
+    el.dlbtn.hidden = view === 'login' || !offSupported;
+    if (view === 'login') { toggleSettings(false); toggleDownloads(false); }
     el.back.hidden = view !== 'player' && stack.length < 2;
   }
 
@@ -888,7 +899,7 @@
     if (!current) return;
     const m = offMeta(), it = m[current.id];
     if (it && it.auto) { it.auto = false; offSaveMeta(m); offRefresh(); return; } // keep a buffered copy
-    if (it && it.done) { el.settings.hidden && el.cog.click(); return; } // manage in Settings
+    if (it && it.done) { toggleDownloads(true); return; } // manage in the Downloads panel
     if (!it) saveOffline(current);
   });
   async function saveOffline(f, opts = {}) {
@@ -1004,10 +1015,17 @@
   }
   function offProgress() {
     if (current) { updateSaveButton(current); showBuffered(); }
-    if (!el.settings.hidden) renderOffline();
+    if (!el.downloads.hidden) renderOffline();
+    updateDlBadge();
   }
   function offRefresh() { offProgress(); if (!playerOpen) renderList(); renderOffline(); }
+  // Header button shows how many items are saved or downloading.
+  function updateDlBadge() {
+    const n = offSupported ? Object.keys(offMeta()).length : 0;
+    el.dlbtn.textContent = n ? `⤓ ${n}` : '⤓';
+  }
   async function renderOffline() {
+    updateDlBadge();
     if (!offSupported) { el.offlist.innerHTML = '<span class="small muted">This browser can\'t save files for offline.</span>'; el.offspace.textContent = ''; return; }
     const items = Object.values(offMeta()).sort((a, b) => a.at - b.at);
     el.offlist.innerHTML = '';
@@ -1026,7 +1044,7 @@
     });
     try {
       const est = await navigator.storage.estimate();
-      el.offspace.textContent = `Using ${fmtSize(est.usage || 0)} of about ${fmtSize(est.quota || 0)} available to the app.`;
+      el.offspace.textContent = `Using ${fmtSize(est.usage) || '0 MB'} of about ${fmtSize(est.quota) || '0 MB'} available to the app.`;
     } catch (e) { el.offspace.textContent = ''; }
   }
   el.offlist.addEventListener('click', (e) => {
@@ -1034,7 +1052,7 @@
     if (d) { const it = offMeta()[Number(d.dataset.del)]; if (it && confirm(`Delete the saved copy of "${it.name}"?`)) deleteOffline(it.id); return; }
     if (p) {
       const it = offMeta()[Number(p.dataset.play)]; if (!it) return;
-      toggleSettings(false);
+      toggleDownloads(false);
       openFile({ id: it.id, name: it.name, file_type: it.file_type || 'VIDEO', size: it.total, start_from: 0 });
     }
   });
@@ -1189,6 +1207,7 @@
 
   function start() {
     setTimeout(resumeOffline, 0);
+    if (offSupported) updateDlBadge();
     show('browser');
     history.replaceState({ d: 1 }, '');
     loadFolder(stack[stack.length - 1].id); renderCrumbs();

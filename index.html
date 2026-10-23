@@ -154,6 +154,7 @@
     <button id="back" class="ghost" hidden aria-label="Back">&larr; Back</button>
     <img id="logo" class="logo" src="icon-192.png" alt="put.io" width="28" height="28">
     <h1 id="title"></h1>
+    <button id="dlbtn" class="ghost" hidden aria-label="Offline downloads" aria-expanded="false" aria-controls="downloads" title="Offline downloads">&#10515;</button>
     <button id="cog" class="ghost" hidden aria-label="Settings" aria-expanded="false" aria-controls="settings" title="Settings">&#9881;</button>
     <button id="signout" class="ghost small" hidden>Sign out</button>
   </header>
@@ -166,11 +167,6 @@
     <label class="toggle"><input type="checkbox" id="bufahead"> Buffer ahead for patchy signal</label>
     <p class="small muted" style="margin:0">Video: plays through the put.io stream and keeps up to 5 min loaded ahead. Audio: saves the whole file to the phone while you listen (kept if you come back to it, removed once finished; the 5 newest are kept). Takes effect on the next file you open.</p>
     <div class="stack" style="gap:8px">
-      <strong class="small">Offline downloads</strong>
-      <div id="offlist" class="stack" style="gap:6px"></div>
-      <p id="offspace" class="small muted" style="margin:0"></p>
-    </div>
-    <div class="stack" style="gap:8px">
       <label for="omdbkey" class="small"><strong>OMDb API key</strong> <span class="muted">(for IMDb ratings, posters and plots)</span></label>
       <input id="omdbkey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key">
       <p class="small muted" style="margin:0">Stored only in this browser on this device. Leave empty to turn it off.</p>
@@ -180,6 +176,11 @@
       <div id="rootdirs" class="stack" style="gap:6px"><span class="small muted">Loading&hellip;</span></div>
       <p class="small muted" style="margin:0">Tick the folders to show. Nothing ticked shows everything.</p>
     </div>
+  </section>
+  <section id="downloads" class="card stack settings" hidden aria-label="Offline downloads">
+    <strong>Offline downloads</strong>
+    <div id="offlist" class="stack" style="gap:6px"></div>
+    <p id="offspace" class="small muted" style="margin:0"></p>
   </section>
 
   <main>
