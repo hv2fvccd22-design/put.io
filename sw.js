@@ -1,6 +1,10 @@
 // App-shell cache only. API calls and video streams are never touched.
 // Bump CACHE on every release: that is what makes installed copies update.
-const CACHE = 'resume-shell-v32';
+const CACHE = 'resume-shell-v33';
+// Artwork (podcast covers from put.io, IMDb posters) kept across app versions.
+const IMG_CACHE = 'resume-img';
+const IMG_MAX = 400;
+const isArtwork = (u) => u.hostname === 'm.media-amazon.com' || (u.hostname === 'api.put.io' && /^\/(screenshots|thumbnails)\//.test(u.pathname));
 const SHELL = ['./', 'index.html', 'app.js', 'hls.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -16,7 +20,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== IMG_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -24,6 +28,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
+  if (req.method === 'GET' && isArtwork(url)) { e.respondWith(artwork(req)); return; }
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   // Cache first: the app opens instantly, also offline or on a weak signal. Updates come
   // from the browser checking sw.js on each open; a new version installs in the
@@ -38,3 +43,18 @@ self.addEventListener('fetch', (e) => {
     })
   );
 });
+
+// Cache first for artwork; fetch and keep it the first time. Images are shown with plain
+// <img>, so an opaque (no-cors) response is fine to store and serve back.
+async function artwork(req) {
+  const cache = await caches.open(IMG_CACHE);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok || res.type === 'opaque') {
+    await cache.put(req, res.clone());
+    const keys = await cache.keys();
+    if (keys.length > IMG_MAX) await Promise.all(keys.slice(0, keys.length - IMG_MAX).map((k) => cache.delete(k)));
+  }
+  return res;
+}

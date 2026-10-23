@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v32';
+  const APP_VERSION = 'v33';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -405,12 +405,25 @@
       loadFolderInfo();
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
-      el.list.innerHTML = '';
+      el.list.innerHTML = ''; el.list.classList.remove('grid');
       const d = document.createElement('div');
-      d.className = 'empty err'; d.textContent = `Could not load this folder (${e.message}).`;
+      // No connection (aeroplane mode etc.): point to what still works, the saved downloads.
+      if (!navigator.onLine || e instanceof TypeError) {
+        d.className = 'empty';
+        d.innerHTML = '<strong>You\'re offline</strong><br><span class="small">Folders need a connection. Anything you saved is in Offline downloads.</span><br>';
+        if (offSupported) {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'primary'; b.style.marginTop = '12px';
+          b.textContent = 'Open offline downloads'; b.addEventListener('click', () => toggleDownloads(true));
+          d.appendChild(b);
+        }
+      } else {
+        d.className = 'empty err'; d.textContent = `Could not load this folder (${e.message}).`;
+      }
       el.list.appendChild(d);
     }
   }
+  // Back online: reload the folder that failed.
+  window.addEventListener('online', () => { if (token && !playerOpen && !searching && !el.list.querySelector('.row')) loadFolder(stack[stack.length - 1].id); });
 
   function renderCrumbs() {
     el.crumbs.innerHTML = '';
@@ -588,6 +601,7 @@
     // The player's own poster too: stays up for audio, shows until a video starts.
     if (img === el.poster) {
       if (posterOk(url)) el.video.poster = url; else el.video.removeAttribute('poster');
+      if (posterOk(url) && current && offSupported) { const m = offMeta(); if (m[current.id] && !m[current.id].poster) { m[current.id].poster = url; offSaveMeta(m); } }
       setMediaSession({ art: posterOk(url) ? url : '' });
     }
   }
@@ -727,7 +741,9 @@
       el.download.href = '#';
       const filmTv = isFilmTvSection();
       el.imdb.hidden = !filmTv;
-      if (filmTv && navigator.onLine) { el.imdb.href = imdbSearchUrl(f); loadInfo(f); }
+      if (filmTv && navigator.onLine) { el.imdb.href = imdbSearchUrl(f); loadInfo(f); } else if (!filmTv) showCoverInfo();
+      const pm = offMeta()[f.id];
+      if (pm && pm.poster && !el.video.getAttribute('poster')) setPoster(el.poster, pm.poster);
       kinds = ['local'];
       playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)} from the saved copy` : 'Playing the saved copy');
       if (f.file_type === 'VIDEO' && filmTv && navigator.onLine) loadSubtitles(f);
