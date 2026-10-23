@@ -144,6 +144,12 @@
   a.menuitem { color: var(--fg); text-decoration: none; display: flex; }
   .menusep { border: 0; border-top: 1px solid var(--line); margin: 4px 8px; }
   .searchbar { margin-bottom: 12px; }
+  .addbar { margin-bottom: 12px; }
+  .addform { margin-top: 10px; }
+  .addform input { width: 100%; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  #addmsg:not(:empty) { margin-top: 8px; }
+  #addmsg.ok { color: var(--accent); }
+  #addmsg.bad { color: var(--bad); }
   .searchbar input { width: 100%; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 11px 16px; }
   .where { display: block; color: var(--muted); font-size: .75rem; }
   .settings .toggle { color: var(--fg); padding: 0; }
@@ -238,6 +244,18 @@
 
     <section id="browser" hidden>
       <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+      <div id="addbar" class="addbar" hidden>
+        <button type="button" id="addbtn" class="small">+ Add download here</button>
+        <form id="addform" class="addform" hidden>
+          <input id="addurl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="magnet:… or https://….torrent" aria-label="Magnet or torrent link" required>
+          <div class="actions" style="margin-top:8px">
+            <button type="submit" class="primary small">Add to put.io</button>
+            <button type="button" id="addcancel" class="ghost small">Cancel</button>
+          </div>
+          <div class="small muted" id="addwhere"></div>
+        </form>
+        <div id="addmsg" class="small" role="status"></div>
+      </div>
       <div id="finfo" class="info card" hidden>
         <img id="fposter" alt="" hidden>
         <div class="info-text">

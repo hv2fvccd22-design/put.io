@@ -1,6 +1,6 @@
 // App-shell cache only. API calls and video streams are never touched.
 // Bump CACHE on every release: that is what makes installed copies update.
-const CACHE = 'resume-shell-v35';
+const CACHE = 'resume-shell-v36';
 // Artwork (podcast covers from put.io, IMDb posters) kept across app versions.
 const IMG_CACHE = 'resume-img';
 const IMG_MAX = 400;

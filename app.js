@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v35';
+  const APP_VERSION = 'v36';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -138,6 +138,7 @@
     toggleMenu(false); toggleSettings(false); toggleDownloads(false);
     if (playerOpen) return; // search from the folder screens
     searching = true;
+    $('#addbar').hidden = true;
     el.searchbar.hidden = false; el.searchbtn.setAttribute('aria-expanded', 'true');
     el.q.focus();
     if (el.q.value.trim().length >= 2) runSearch();
@@ -439,7 +440,42 @@
     });
     setTitle(stack.length > 1 ? stack[stack.length - 1].name : '');
     el.back.hidden = stack.length < 2;
+    updateAddBar();
   }
+
+  /* ---------- add a download (magnet / .torrent link) into this folder ---------- */
+  // Shown in Movies / TV Shows and every folder below them (a show, a season...).
+  let addFor = null;
+  function updateAddBar() {
+    const bar = $('#addbar'); if (!bar) return;
+    const show = !!token && !searching && stack.length >= 2 && isFilmTvSection();
+    bar.hidden = !show;
+    const here = stack[stack.length - 1];
+    if (addFor !== here.id) { addFor = here.id; $('#addform').hidden = true; $('#addmsg').textContent = ''; }
+    $('#addwhere').textContent = `Saves into: ${stack.slice(1).map((s) => s.name).join(' / ')}`;
+  }
+  $('#addbtn').addEventListener('click', () => {
+    const f = $('#addform'); f.hidden = !f.hidden;
+    if (!f.hidden) { $('#addurl').value = ''; $('#addmsg').textContent = ''; $('#addurl').focus(); }
+  });
+  $('#addcancel').addEventListener('click', () => { $('#addform').hidden = true; });
+  $('#addform').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = $('#addurl').value.trim(), msg = $('#addmsg'), folder = stack[stack.length - 1];
+    if (!/^magnet:\?/i.test(url) && !/^https?:\/\//i.test(url)) { msg.className = 'bad'; msg.textContent = 'Paste a magnet link (magnet:?…) or a link to a .torrent file.'; return; }
+    msg.className = ''; msg.textContent = 'Sending to put.io…';
+    try {
+      const r = await api('/transfers/add', { method: 'POST', params: { url, save_parent_id: folder.id } });
+      const t = (r && r.transfer) || {};
+      const name = t.name || (/[?&]dn=([^&]+)/i.exec(url) ? decodeURIComponent(/[?&]dn=([^&]+)/i.exec(url)[1].replace(/\+/g, ' ')) : 'Download');
+      msg.className = 'ok';
+      msg.textContent = `Added to put.io: ${name}${t.status ? ` (${t.status.toLowerCase().replace(/_/g, ' ')})` : ''}. It will appear in ${folder.name} when it finishes.`;
+      $('#addform').hidden = true;
+    } catch (err) {
+      if (err.auth) return logout('Your token was rejected. Connect again.');
+      msg.className = 'bad'; msg.textContent = `put.io didn't accept that link (${err.message}).`;
+    }
+  });
 
   // Poster grid: the shows/films directly inside a Movies or TV Shows folder.
   const gridMode = () => el.grid.checked && stack.length === 2 && isFilmTvSection();
