@@ -117,6 +117,11 @@
   .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
 
   video { width: 100%; max-height: 62vh; background: #000; border-radius: 10px; display: block; }
+  /* Full screen: use the whole display (the page-size limit above must not apply). */
+  video:fullscreen { width: 100vw; height: 100vh; max-height: none; border-radius: 0; object-fit: contain; }
+  video:-webkit-full-screen { width: 100vw; height: 100vh; max-height: none; border-radius: 0; object-fit: contain; }
+  body.fillscreen video:fullscreen { object-fit: cover; }
+  body.fillscreen video:-webkit-full-screen { object-fit: cover; }
   .bufbar { position: relative; height: 8px; margin-top: 8px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
   .bufbar .ranges > div { position: absolute; top: 0; bottom: 0; background: #fdce45; }
   .bufbar .played { position: absolute; top: 0; bottom: 0; left: 0; background: var(--fg); border-right: 2px solid var(--bg); }
@@ -162,6 +167,8 @@
     <strong>Settings</strong>
     <label class="toggle"><input type="checkbox" id="autoplay"> Auto-start playback when a file opens</label>
     <label class="toggle"><input type="checkbox" id="playnext"> Play next: when a file ends, play the next one in the folder</label>
+    <label class="toggle"><input type="checkbox" id="autofs"> Open videos full screen (landscape)</label>
+    <label class="toggle"><input type="checkbox" id="fillfs"> Fill the screen in full screen (crops the edges a little)</label>
     <label class="toggle"><input type="checkbox" id="grid"> Poster grid for Movies and TV Shows</label>
     <label class="toggle"><input type="checkbox" id="hidenp"> Hide non-playable files (images, .nfo, .txt…)</label>
     <label class="toggle"><input type="checkbox" id="bufahead"> Buffer ahead for patchy signal</label>

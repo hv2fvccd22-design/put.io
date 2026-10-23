@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v29';
+  const APP_VERSION = 'v30';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -11,6 +11,8 @@
   const KEY_HIDENP = 'resume.hidenp';
   const KEY_PLAYNEXT = 'resume.playnext';
   const KEY_GRID = 'resume.grid';
+  const KEY_AUTOFS = 'resume.autofs';
+  const KEY_FILLFS = 'resume.fillfs';
   const KEY_OMDB = 'resume.omdbkey';
   const KEY_OMDB_CACHE = 'resume.omdbcache';
   const BUFFER_AHEAD_SECS = 300;
@@ -28,7 +30,7 @@
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
     rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'),
     save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'),
-    dlbtn: $('#dlbtn'), downloads: $('#downloads'), omdbkey: $('#omdbkey'),
+    dlbtn: $('#dlbtn'), downloads: $('#downloads'), autofs: $('#autofs'), fillfs: $('#fillfs'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
@@ -59,6 +61,29 @@
   el.grid.addEventListener('change', () => {
     store.set(KEY_GRID, el.grid.checked ? 'on' : 'off');
     if (!playerOpen) renderList();
+  });
+  // Full screen: open videos full screen (on unless switched off); fill = crop to the
+  // screen's shape (off unless switched on). Full screen also turns the phone landscape.
+  el.autofs.checked = store.get(KEY_AUTOFS) !== 'off';
+  el.autofs.addEventListener('change', () => store.set(KEY_AUTOFS, el.autofs.checked ? 'on' : 'off'));
+  el.fillfs.checked = store.get(KEY_FILLFS) === 'on';
+  document.body.classList.toggle('fillscreen', el.fillfs.checked);
+  el.fillfs.addEventListener('change', () => {
+    store.set(KEY_FILLFS, el.fillfs.checked ? 'on' : 'off');
+    document.body.classList.toggle('fillscreen', el.fillfs.checked);
+  });
+  // Must run inside the tap that opened the video (browsers only allow full screen then).
+  function goFullscreen() {
+    const v = el.video;
+    const req = v.requestFullscreen || v.webkitRequestFullscreen;
+    if (!req || document.fullscreenElement) return;
+    try { const p = req.call(v); if (p && p.catch) p.catch(() => {}); } catch (e) { /* not allowed here */ }
+  }
+  document.addEventListener('fullscreenchange', () => {
+    const o = screen.orientation;
+    if (!o) return;
+    if (document.fullscreenElement === el.video) { if (o.lock) o.lock('landscape').catch(() => {}); }
+    else if (o.unlock) { try { o.unlock(); } catch (e) { /* ignore */ } }
   });
   // Play next: on unless switched off.
   el.playnext.checked = store.get(KEY_PLAYNEXT) !== 'off';
@@ -1054,6 +1079,7 @@
       const it = offMeta()[Number(p.dataset.play)]; if (!it) return;
       toggleDownloads(false);
       openFile({ id: it.id, name: it.name, file_type: it.file_type || 'VIDEO', size: it.total, start_from: 0 });
+      if ((it.file_type || 'VIDEO') === 'VIDEO' && el.autofs.checked) goFullscreen();
     }
   });
 
@@ -1116,6 +1142,7 @@
 
   async function closePlayer() {
     if (!playerOpen) return;
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
     await saveNow(false);
     revokeLocal();
     el.video.pause(); destroyHls(); clearSubtitles();
@@ -1157,7 +1184,7 @@
     if (e.target.closest('.dl')) { e.stopPropagation(); startDownload(f); return; }
     if (e.target.closest('.del')) { e.stopPropagation(); deleteFile(f); return; }
     if (f.file_type === 'FOLDER') enterFolder(f);
-    else if (isPlayable(f)) openFile(f);
+    else if (isPlayable(f)) { openFile(f); if (f.file_type === 'VIDEO' && el.autofs.checked) goFullscreen(); }
     else api(`/files/${f.id}/url`).then((r) => { window.open(r.url, '_blank', 'noopener'); }).catch(() => {});
   });
 
