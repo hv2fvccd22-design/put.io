@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v31';
+  const APP_VERSION = 'v32';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -30,7 +30,8 @@
     bufahead: $('#bufahead'), buf: $('#buf'), bufbar: $('#bufbar'),
     rootdirs: $('#rootdirs'), imdb: $('#imdb'), hidenp: $('#hidenp'), playnext: $('#playnext'), next: $('#next'),
     save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'),
-    dlbtn: $('#dlbtn'), downloads: $('#downloads'), autofs: $('#autofs'), fillfs: $('#fillfs'), omdbkey: $('#omdbkey'),
+    dlbtn: $('#dlbtn'), downloads: $('#downloads'),
+    menubtn: $('#menubtn'), menu: $('#menu'), searchbtn: $('#searchbtn'), searchbar: $('#searchbar'), q: $('#q'), autofs: $('#autofs'), fillfs: $('#fillfs'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
     subs: $('#subs'), subsel: $('#subsel'), subdl: $('#subdl'),
@@ -52,7 +53,7 @@
   el.bufahead.addEventListener('change', () => store.set(KEY_BUFFER, el.bufahead.checked ? 'on' : 'off'));
   const canBufferAhead = () => el.bufahead.checked && !!(window.Hls && window.Hls.isSupported());
   function toggleSettings(open) {
-    if (open) toggleDownloads(false);
+    if (open) { toggleDownloads(false); toggleMenu(false); }
     el.settings.hidden = !open;
     el.cog.setAttribute('aria-expanded', String(open));
   }
@@ -106,12 +107,107 @@
   });
   // Offline downloads have their own panel (header ⤓ button).
   function toggleDownloads(open) {
-    if (open) toggleSettings(false);
+    if (open) { toggleSettings(false); toggleMenu(false); }
     el.downloads.hidden = !open;
     el.dlbtn.setAttribute('aria-expanded', String(open));
     if (open) renderOffline();
   }
   el.dlbtn.addEventListener('click', () => toggleDownloads(el.downloads.hidden));
+
+  /* ---------- ☰ menu ---------- */
+  function toggleMenu(open) {
+    if (open) { toggleSettings(false); toggleDownloads(false); }
+    el.menu.hidden = !open;
+    el.menubtn.setAttribute('aria-expanded', String(open));
+  }
+  el.menubtn.addEventListener('click', () => toggleMenu(el.menu.hidden));
+  $('#m-settings').addEventListener('click', () => { toggleMenu(false); if (el.settings.hidden) el.cog.click(); });
+  $('#m-signout').addEventListener('click', () => { toggleMenu(false); logout(''); });
+  $('#m-home').addEventListener('click', async () => {
+    toggleMenu(false); closeSearch();
+    if (playerOpen) await closePlayer();
+    stack = [{ id: 0, name: 'Files' }];
+    history.pushState({ d: 1 }, '');
+    show('browser'); loadFolder(0); renderCrumbs();
+  });
+
+  /* ---------- search (whole put.io account) ---------- */
+  let searching = false, results = [], searchSeq = 0, searchTimer = null;
+  function openSearch() {
+    toggleMenu(false); toggleSettings(false); toggleDownloads(false);
+    if (playerOpen) return; // search from the folder screens
+    searching = true;
+    el.searchbar.hidden = false; el.searchbtn.setAttribute('aria-expanded', 'true');
+    el.q.focus();
+    if (el.q.value.trim().length >= 2) runSearch();
+  }
+  function closeSearch() {
+    if (!searching && el.searchbar.hidden) return;
+    searching = false; results = [];
+    el.searchbar.hidden = true; el.searchbtn.setAttribute('aria-expanded', 'false');
+    if (!playerOpen && token) renderList();
+  }
+  el.searchbtn.addEventListener('click', () => (searching ? closeSearch() : openSearch()));
+  el.q.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 350);
+  });
+  el.q.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSearch(); });
+  async function runSearch() {
+    const q = el.q.value.trim(), seq = ++searchSeq;
+    if (q.length < 2) { results = []; if (searching) renderResults('Type at least 2 letters.'); return; }
+    renderResults('Searching…');
+    try {
+      const r = await api('/files/search', { params: { query: q, per_page: 100 } });
+      if (seq !== searchSeq || !searching) return;
+      const hide = el.hidenp.checked;
+      results = (r.files || []).filter((f) => !hide || f.file_type === 'FOLDER' || isPlayable(f))
+        .sort((a, b) => (a.file_type === 'FOLDER' ? 0 : 1) - (b.file_type === 'FOLDER' ? 0 : 1));
+      renderResults(results.length ? '' : 'Nothing found.');
+    } catch (e) {
+      if (e.auth) return logout('Your token was rejected. Connect again.');
+      if (seq === searchSeq) renderResults(`Search failed (${e.message}).`);
+    }
+  }
+  function renderResults(msg) {
+    el.list.innerHTML = ''; el.list.classList.remove('grid');
+    el.crumbs.innerHTML = '<span class="here">Search results</span>';
+    if (el.finfo) el.finfo.hidden = true;
+    if (msg) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = msg; el.list.appendChild(d); return; }
+    results.forEach((f, i) => {
+      const row = document.createElement('button');
+      row.type = 'button'; row.className = 'row'; row.dataset.result = String(i);
+      const k = document.createElement('span'); k.className = 'kind' + (f.file_type === 'VIDEO' ? ' vid' : ''); k.textContent = kindLabel(f.file_type);
+      const n = document.createElement('span'); n.className = 'name'; n.textContent = f.name;
+      const m = document.createElement('span'); m.className = 'meta'; m.textContent = f.file_type === 'FOLDER' ? '' : fmtSize(f.size);
+      row.append(k, n, m);
+      el.list.appendChild(row);
+    });
+  }
+  // Open a result where it lives: rebuild its folder path, then open the folder (or play the file).
+  async function openResult(f) {
+    const folderId = f.file_type === 'FOLDER' ? f.id : f.parent_id;
+    const chain = [];
+    try {
+      let id = folderId;
+      while (id && chain.length < 12) {
+        const r = await api(`/files/${id}`);
+        chain.unshift({ id, name: r.file.name });
+        id = r.file.parent_id;
+      }
+    } catch (e) {
+      if (e.auth) return logout('Your token was rejected. Connect again.');
+      setStatus(`Could not open that (${e.message}).`, 'bad'); return;
+    }
+    closeSearch();
+    stack = [{ id: 0, name: 'Files' }, ...chain];
+    history.pushState({ d: stack.length }, '');
+    await loadFolder(folderId); renderCrumbs();
+    if (f.file_type !== 'FOLDER') {
+      const g = files.find((x) => x.id === f.id);
+      if (g && isPlayable(g)) openFile(g);
+    }
+  }
 
   // Which top-level folders the main screen shows, by put.io folder id.
   // Ticked top-level folders, in the order the main screen shows them (put.io folder ids).
@@ -215,10 +311,13 @@
     el.login.hidden = view !== 'login';
     el.browser.hidden = view !== 'browser';
     el.player.hidden = view !== 'player';
-    el.signout.hidden = view === 'login';
-    el.cog.hidden = view === 'login';
+    // Settings and Sign out live in the ☰ menu now; their old header buttons stay hidden.
+    el.signout.hidden = true;
+    el.cog.hidden = true;
+    el.menubtn.hidden = view === 'login';
+    el.searchbtn.hidden = view === 'login';
     el.dlbtn.hidden = view === 'login' || !offSupported;
-    if (view === 'login') { toggleSettings(false); toggleDownloads(false); }
+    if (view === 'login') { toggleSettings(false); toggleDownloads(false); toggleMenu(false); closeSearch(); }
     el.back.hidden = view !== 'player' && stack.length < 2;
   }
 
@@ -378,6 +477,8 @@
   }
 
   function renderList() {
+    // While search is open the list shows results; background refreshes mustn't replace them.
+    if (searching) { renderResults(results.length ? '' : (el.q.value.trim().length >= 2 ? 'Nothing found.' : 'Type to search.')); return; }
     renderCrumbs();
     el.list.innerHTML = '';
     el.list.classList.remove('grid');
@@ -1179,6 +1280,8 @@
     }
   });
   el.list.addEventListener('click', (e) => {
+    const res = e.target.closest('.row[data-result]');
+    if (res) { const f = results[Number(res.dataset.result)]; if (f) openResult(f); return; }
     const row = e.target.closest('.row'); if (!row) return;
     const f = files[Number(row.dataset.index)]; if (!f) return;
     if (e.target.closest('.dl')) { e.stopPropagation(); startDownload(f); return; }
@@ -1199,6 +1302,7 @@
   el.back.addEventListener('click', () => history.back());
 
   window.addEventListener('popstate', (e) => {
+    if (searching) closeSearch();
     if (!token) return;
     if (playerOpen && !(e.state && e.state.p)) { closePlayer(); return; }
     const target = (e.state && e.state.d) || 1;

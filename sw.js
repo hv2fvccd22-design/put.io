@@ -1,6 +1,6 @@
 // App-shell cache only. API calls and video streams are never touched.
 // Bump CACHE on every release: that is what makes installed copies update.
-const CACHE = 'resume-shell-v31';
+const CACHE = 'resume-shell-v32';
 const SHELL = ['./', 'index.html', 'app.js', 'hls.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
