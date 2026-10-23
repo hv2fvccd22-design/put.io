@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v40';
+  const APP_VERSION = 'v41';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -504,9 +504,8 @@
       const n = f.name.trim();
       if (/^(tv( shows?)?|series)$/i.test(n)) return 'tv';
       if (/^(movies?|films?)$/i.test(n)) return 'popcorn';
-      if (/podcast/i.test(n)) return 'mic';
       if (/audio ?books?/i.test(n)) return 'headphones';
-      if (/music|soundcloud|tracks/i.test(n)) return 'music';
+      if (/music|podcast|soundcloud|tracks/i.test(n)) return 'music';
       return 'folder';
     }
     return ({ VIDEO: 'play', AUDIO: 'music', IMAGE: 'image', PDF: 'doc', TEXT: 'doc', ARCHIVE: 'box' })[f.file_type] || 'file';
