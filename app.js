@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v42';
+  const APP_VERSION = 'v43';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -33,6 +33,7 @@
     save: $('#save'), offlist: $('#offlist'), offspace: $('#offspace'), grid: $('#grid'),
     dlbtn: $('#dlbtn'), downloads: $('#downloads'), flatten: $('#flatten'),
     upcoming: $('#upcoming'), upList: $('#up-list'),
+    home: $('#home'), homeRows: $('#home-rows'), tabs: $('#tabs'),
     menubtn: $('#menubtn'), menu: $('#menu'), searchbtn: $('#searchbtn'), searchbar: $('#searchbar'), q: $('#q'), autofs: $('#autofs'), fillfs: $('#fillfs'), omdbkey: $('#omdbkey'),
     info: $('#info'), poster: $('#poster'), infoTitle: $('#info-title'), infoMeta: $('#info-meta'), infoPlot: $('#info-plot'),
     finfo: $('#finfo'), fposter: $('#fposter'), finfoTitle: $('#finfo-title'), finfoMeta: $('#finfo-meta'), finfoPlot: $('#finfo-plot'), finfoImdb: $('#finfo-imdb'),
@@ -133,12 +134,171 @@
   $('#m-settings').addEventListener('click', () => { toggleMenu(false); if (el.settings.hidden) el.cog.click(); });
   $('#m-signout').addEventListener('click', () => { toggleMenu(false); logout(''); });
   $('#m-home').addEventListener('click', async () => {
-    toggleMenu(false); closeSearch();
+    toggleMenu(false);
     if (playerOpen) await closePlayer();
+    goHome();
+  });
+
+  /* ---------- watch history (for Continue watching / Up next) ---------- */
+  // Per device: what you opened, where you got to, and the next episode when you finish one.
+  // Positions also refresh from put.io, so progress from other devices shows up.
+  const KEY_HISTORY = 'resume.history';
+  const hist = () => { try { const h = JSON.parse(store.get(KEY_HISTORY) || '[]'); return Array.isArray(h) ? h : []; } catch (e) { return []; } };
+  const saveHist = (h) => store.set(KEY_HISTORY, JSON.stringify(h.slice(0, 40)));
+  function upsertHist(item) {
+    const h = hist(), i = h.findIndex((x) => x.id === item.id);
+    const merged = { ...(i >= 0 ? h[i] : {}), ...item };
+    if (i >= 0) h.splice(i, 1);
+    h.unshift(merged); saveHist(h);
+  }
+  function recordHistory(f) {
+    if (!isPlayable(f)) return;
+    upsertHist({ id: f.id, name: f.name, file_type: f.file_type, path: stack.map((s) => ({ id: s.id, name: s.name })),
+      img: f.screenshot || (hist().find((x) => x.id === f.id) || {}).img || '', at: Date.now(), finished: false, upnext: false });
+  }
+  function historyPos(id, secs) {
+    const h = hist(), it = h.find((x) => x.id === id); if (!it) return;
+    it.pos = secs; if (isFinite(el.video.duration) && current && current.id === id) it.dur = Math.floor(el.video.duration);
+    it.upnext = false; saveHist(h);
+  }
+  function historyArt(id, url) {
+    const h = hist(), it = h.find((x) => x.id === id);
+    if (it && (!it.img || it.file_type === 'AUDIO')) { it.art = url; saveHist(h); }
+  }
+  function historyFinished(id, next) {
+    const h = hist(), it = h.find((x) => x.id === id);
+    if (it) { it.finished = true; it.pos = 0; saveHist(h); }
+    if (next && isPlayable(next) && it) upsertHist({ id: next.id, name: next.name, file_type: next.file_type, path: it.path, img: next.screenshot || '', art: it.art, at: Date.now(), pos: 0, finished: false, upnext: true });
+  }
+
+  /* ---------- Home (Plex-style): Continue watching + Recently added rows ---------- */
+  function goHome(push = true) {
+    toggleMenu(false); toggleDownloads(false); toggleSettings(false); closeSearch();
+    if (push) history.pushState({ home: 1 }, '');
+    show('home'); setTitle('');
+    loadHome();
+  }
+  function goLibrary() {
+    toggleDownloads(false); closeSearch();
     stack = [{ id: 0, name: 'Files' }];
     history.pushState({ d: 1 }, '');
     show('browser'); loadFolder(0); renderCrumbs();
+  }
+  el.tabs.addEventListener('click', async (e) => {
+    const t = e.target.closest('.tab'); if (!t) return;
+    if (playerOpen) await closePlayer();
+    if (t.dataset.tab === 'home') goHome();
+    else if (t.dataset.tab === 'library') goLibrary();
+    else if (t.dataset.tab === 'upcoming') openUpcoming();
+    else if (t.dataset.tab === 'downloads') toggleDownloads(el.downloads.hidden);
   });
+  const continueItems = () => hist().filter((x) => !x.finished && (x.upnext || ((x.pos || 0) > MIN_SAVE_SECONDS && (!x.dur || x.pos < x.dur - 30)))).slice(0, 15);
+  function cwCard(it) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'cw';
+    const th = document.createElement('div'); th.className = 'thumb' + (it.img ? '' : ' square');
+    const src = it.img || it.art;
+    if (src && posterOk(src)) th.appendChild(Object.assign(document.createElement('img'), { src, alt: '', loading: 'lazy' }));
+    if (it.upnext) th.appendChild(Object.assign(document.createElement('span'), { className: 'tag', textContent: 'UP NEXT' }));
+    if (!it.upnext && it.dur) { const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); fill.style.width = `${Math.min(100, Math.round((it.pos / it.dur) * 100))}%`; bar.appendChild(fill); th.appendChild(bar); }
+    const p = parseRelease(it.name), show = (it.path[2] && it.path[2].name) || (it.path[it.path.length - 1] || {}).name || '';
+    const t1 = document.createElement('div'); t1.className = 't1';
+    const t2 = document.createElement('div'); t2.className = 't2';
+    if (p.season != null) { t1.textContent = parseRelease(show).title || p.title; t2.textContent = `S${p.season}E${p.episode}${it.dur && !it.upnext ? ' · ' + fmtTime(Math.max(0, it.dur - it.pos)) + ' left' : ''}`; }
+    else { t1.textContent = it.name.replace(/\.[a-z0-9]{2,4}$/i, ''); t2.textContent = (it.path[it.path.length - 1] || {}).name || ''; }
+    b.append(th, t1, t2);
+    b.addEventListener('click', () => resumeItem(it));
+    return b;
+  }
+  // Open a history item where it lives (so Next / covers work), then play it.
+  async function resumeItem(it) {
+    stack = it.path.map((s) => ({ ...s }));
+    await loadFolder(stack[stack.length - 1].id);
+    const g = files.find((x) => x.id === it.id);
+    if (g) openFile(g, { from: 'home' });
+    else { show('browser'); renderCrumbs(); setStatus('That file is no longer in its folder.', 'warn'); }
+  }
+  function row(title, items) {
+    const sec = document.createElement('section'); sec.className = 'hrow';
+    const h = document.createElement('h2'); h.textContent = title;
+    const sc = document.createElement('div'); sc.className = 'hscroll';
+    items.forEach((x) => sc.appendChild(x));
+    sec.append(h, sc); el.homeRows.appendChild(sec);
+    return sc;
+  }
+  let homeObs = null, homeLibs = null;
+  function posterTile(f, lib, cover) {
+    const p = parseRelease(f.name);
+    const t = document.createElement('button'); t.type = 'button'; t.className = 'tile';
+    const box = document.createElement('div'); box.className = 'pimg'; box.textContent = p.title || f.name;
+    if (cover && posterOk(cover)) box.appendChild(Object.assign(document.createElement('img'), { src: cover, alt: '', loading: 'lazy' }));
+    const nm = document.createElement('div'); nm.className = 'tname'; nm.textContent = p.title || f.name;
+    const meta = document.createElement('div'); meta.className = 'tmeta'; meta.textContent = p.year || '';
+    t.append(box, nm, meta);
+    if (!cover && lib.kind !== 'pod' && homeObs && p.title) { t.dataset.title = p.title; t.dataset.year = p.year; homeObs.observe(t); }
+    t.addEventListener('click', () => {
+      stack = [{ id: 0, name: 'Files' }, { id: lib.id, name: lib.name }, { id: f.id, name: f.name }];
+      history.pushState({ d: 3 }, '');
+      show('browser'); loadFolder(f.id); renderCrumbs();
+    });
+    return t;
+  }
+  function renderHome() {
+    el.homeRows.innerHTML = '';
+    const cw = continueItems();
+    if (cw.length) row('Continue watching', cw.map(cwCard));
+    if (homeLibs) homeLibs.forEach((lib) => { if (lib.items.length) row(lib.title, lib.items.map((f) => posterTile(f, lib, f._cover))); });
+    if (!el.homeRows.children.length) el.homeRows.innerHTML = navigator.onLine
+      ? '<div class="empty">Loading your libraries&hellip;</div>'
+      : '<div class="empty"><strong>You\'re offline</strong><br><span class="small">Saved items are in Downloads.</span></div>';
+  }
+  async function loadHome() {
+    if (homeObs) homeObs.disconnect();
+    homeObs = store.get(KEY_OMDB) && 'IntersectionObserver' in window ? new IntersectionObserver((ents) => {
+      ents.forEach((en) => { if (en.isIntersecting) { homeObs.unobserve(en.target); posterQueue.push(en.target); } });
+      pumpPosters();
+    }, { rootMargin: '200px' }) : null;
+    renderHome();
+    try {
+      const root = await api('/files/list', { params: { parent_id: 0, per_page: 1000 } });
+      const picked = rootPicks();
+      const libs = (root.files || []).filter((f) => f.file_type === 'FOLDER' && (!picked.size || picked.has(f.id))).map((f) => {
+        const n = f.name.trim();
+        const kind = /^(tv( shows?)?|series)$/i.test(n) ? 'tv' : /^(movies?|films?)$/i.test(n) ? 'movie' : /podcast/i.test(n) ? 'pod' : null;
+        return kind && { id: f.id, name: f.name, kind, title: kind === 'pod' ? f.name : `Recently added in ${f.name}`, items: [] };
+      }).filter(Boolean).sort((a, b) => ['tv', 'movie', 'pod'].indexOf(a.kind) - ['tv', 'movie', 'pod'].indexOf(b.kind));
+      await pool(libs, 2, async (lib) => {
+        const r = await api('/files/list', { params: { parent_id: lib.id, per_page: 1000 } });
+        lib.items = (r.files || []).filter((f) => f.file_type === 'FOLDER' && f.name !== 'to_sort')
+          .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''))).slice(0, 15);
+        if (lib.kind === 'pod') await pool(lib.items, 3, async (f) => {
+          try { f._cover = folderCover(((await api('/files/list', { params: { parent_id: f.id, per_page: 200 } })).files) || []); } catch (e) { /* no cover */ }
+        });
+      });
+      homeLibs = libs;
+    } catch (e) {
+      if (e.auth) return logout('Your token was rejected. Connect again.');
+    }
+    if (el.home.hidden) return;
+    renderHome();
+    // Refresh positions from put.io (progress made on other devices), then redraw.
+    const cw = continueItems();
+    if (cw.length && navigator.onLine) {
+      let changed = false;
+      await pool(cw, 3, async (it) => {
+        try {
+          const r = await api(`/files/${it.id}`);
+          if (r && r.file) {
+            const sf = r.file.start_from || 0, h = hist(), x = h.find((y) => y.id === it.id);
+            if (x && !x.upnext && sf && sf !== x.pos) { x.pos = sf; saveHist(h); changed = true; }
+            if (x && !x.img && r.file.screenshot) { x.img = r.file.screenshot; saveHist(h); changed = true; }
+          }
+        } catch (e) {
+          if (e.status === 404) { saveHist(hist().filter((y) => y.id !== it.id)); changed = true; }
+        }
+      });
+      if (changed && !el.home.hidden) renderHome();
+    }
+  }
 
   /* ---------- upcoming episodes (TVmaze: free, no key, allows web apps) ---------- */
   // Followed = every show folder in your TV Shows folder (matched by name + year), plus any
@@ -330,7 +490,7 @@
   function openSearch() {
     toggleMenu(false); toggleSettings(false); toggleDownloads(false);
     if (playerOpen) return; // search from the folder screens
-    if (!el.upcoming.hidden) show('browser'); // results show in the folder view
+    if (el.browser.hidden) show('browser'); // results show in the folder view
     searching = true;
     $('#addbar').hidden = true;
     el.searchbar.hidden = false; el.searchbtn.setAttribute('aria-expanded', 'true');
@@ -540,6 +700,12 @@
     el.browser.hidden = view !== 'browser';
     el.player.hidden = view !== 'player';
     el.upcoming.hidden = view !== 'upcoming';
+    el.home.hidden = view !== 'home';
+    // Bottom tabs: hidden on sign-in and in the player (like Plex).
+    const tabsOn = view !== 'login' && view !== 'player';
+    el.tabs.hidden = !tabsOn; document.body.classList.toggle('has-tabs', tabsOn);
+    const active = view === 'home' ? 'home' : view === 'upcoming' ? 'upcoming' : view === 'browser' ? 'library' : '';
+    el.tabs.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === active));
     // Settings and Sign out live in the ☰ menu now; their old header buttons stay hidden.
     el.signout.hidden = true;
     el.cog.hidden = true;
@@ -547,7 +713,7 @@
     el.searchbtn.hidden = view === 'login';
     el.dlbtn.hidden = view === 'login' || !offSupported;
     if (view === 'login') { toggleSettings(false); toggleDownloads(false); toggleMenu(false); closeSearch(); }
-    el.back.hidden = view !== 'player' && view !== 'upcoming' && stack.length < 2;
+    el.back.hidden = view === 'home' || (view !== 'player' && view !== 'upcoming' && stack.length < 2);
   }
 
   /* ---------- put.io API ---------- */
@@ -587,6 +753,7 @@
       await position.set(id, secs, keepalive);
       delete pending[id]; savePending();
       lastSavedSecs = secs;
+      historyPos(id, secs);
       if (current && current.id === id) {
         current.start_from = secs;
         setStatus(`Saved at ${fmtTime(secs)}`);
@@ -911,6 +1078,7 @@
     // The player's own poster too: stays up for audio, shows until a video starts.
     if (img === el.poster) {
       if (posterOk(url)) el.video.poster = url; else el.video.removeAttribute('poster');
+      if (posterOk(url) && current) historyArt(current.id, url);
       if (posterOk(url) && current && offSupported) { const m = offMeta(); if (m[current.id] && !m[current.id].poster) { m[current.id].poster = url; offSaveMeta(m); } }
       setMediaSession({ art: posterOk(url) ? url : '' });
     }
@@ -1014,8 +1182,11 @@
   }
 
   let forcePlay = false; // playing on from the previous file: start even if Auto-start is off
+  let playerFrom = 'browser'; // the screen Back returns to
   async function openFile(f, opts = {}) {
+    if (!playerOpen) playerFrom = opts.from || (!el.home.hidden ? 'home' : !el.upcoming.hidden ? 'upcoming' : 'browser');
     current = f;
+    recordHistory(f);
     lastSaveAt = 0; lastSavedSecs = -1;
     forcePlay = !!opts.next;
     // Moving on to the next file replaces the player entry, so Back still goes to the folder.
@@ -1286,6 +1457,7 @@
     current.start_from = 0; lastSavedSecs = -1;
     const om = offSupported && offMeta()[id];
     if (om && om.auto && om.done) deleteOffline(id);
+    historyFinished(id, nextFile());
     const n = el.playnext.checked ? nextFile() : null;
     if (n && current.id === id) { openFile(n, { next: true }); return; }
     setStatus('Finished. Position cleared.');
@@ -1577,7 +1749,9 @@
     const f = files.find((x) => current && x.id === current.id);
     if (f && current) f.start_from = current.start_from;
     playerOpen = false; current = null;
-    show('browser'); renderList();
+    if (playerFrom === 'home') { show('home'); renderHome(); }
+    else if (playerFrom === 'upcoming') show('upcoming');
+    else { show('browser'); renderList(); }
   }
 
   /* ---------- navigation and auth ---------- */
@@ -1630,8 +1804,11 @@
   window.addEventListener('popstate', (e) => {
     if (searching) closeSearch();
     if (!token) return;
-    if (!el.upcoming.hidden && !(e.state && e.state.up)) { show('browser'); renderList(); return; }
-    if (playerOpen && !(e.state && e.state.p)) { closePlayer(); return; }
+    const s = e.state || {};
+    if (playerOpen && !s.p) { closePlayer(); return; }
+    if (s.home) { if (el.home.hidden) goHome(false); return; }
+    if (s.up) { show('upcoming'); return; }
+    if (el.browser.hidden) { show('browser'); renderList(); }
     const target = (e.state && e.state.d) || 1;
     if (target !== stack.length) { stack.length = Math.max(1, Math.min(target, stack.length)); loadFolder(stack[stack.length - 1].id); renderCrumbs(); }
   });
@@ -1666,9 +1843,8 @@
   function start() {
     setTimeout(resumeOffline, 0);
     if (offSupported) updateDlBadge();
-    show('browser');
-    history.replaceState({ d: 1 }, '');
-    loadFolder(stack[stack.length - 1].id); renderCrumbs();
+    history.replaceState({ home: 1 }, '');
+    goHome(false);
     flushPending();
   }
 

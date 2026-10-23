@@ -147,6 +147,28 @@
   .menusep { border: 0; border-top: 1px solid var(--line); margin: 4px 8px; }
   .searchbar { margin-bottom: 12px; }
   .addbar { margin-bottom: 12px; }
+  /* bottom tab bar (Plex-style) */
+  body.has-tabs { padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
+  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; justify-content: space-around; background: var(--surface); border-top: 1px solid var(--line); padding: 6px 0 calc(6px + env(safe-area-inset-bottom, 0px)); }
+  .tab { flex: 1; background: none; border: 0; border-radius: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: .7rem; color: var(--muted); padding: 4px 0; }
+  .tab svg { width: 24px; height: 24px; }
+  .tab.on { color: #fdce45; }
+  /* home rows */
+  .hrow { margin: 4px 0 22px; }
+  .hrow h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 650; }
+  .hscroll { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x proximity; scrollbar-width: none; }
+  .hscroll::-webkit-scrollbar { display: none; }
+  .hscroll > * { scroll-snap-align: start; }
+  .cw { flex: 0 0 220px; display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; }
+  .cw .thumb { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
+  .cw .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .cw .thumb.square img { object-fit: contain; background: #000; }
+  .cw .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0,0,0,.5); }
+  .cw .bar i { display: block; height: 100%; background: #fdce45; }
+  .cw .tag { position: absolute; top: 6px; left: 6px; font-size: .65rem; font-weight: 700; background: rgba(0,0,0,.7); color: #fdce45; padding: 2px 6px; border-radius: 4px; }
+  .cw .t1 { font-size: .85rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cw .t2 { font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hscroll .tile { flex: 0 0 116px; display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; }
   .grouphdr { padding: 8px 14px 4px; font-size: .75rem; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--line); }
   .up-day { font-weight: 650; margin: 14px 0 4px; }
   .up-day:first-child { margin-top: 0; }
@@ -288,6 +310,10 @@
       <div id="list" class="list" aria-live="polite"></div>
     </section>
 
+    <section id="home" hidden>
+      <div id="home-rows"></div>
+    </section>
+
     <section id="upcoming" hidden>
       <div id="up-list" class="stack" style="gap:6px"></div>
       <details id="up-manage" class="card up-manage">
@@ -333,6 +359,12 @@
   <footer id="ver" class="ver"></footer>
 </div>
 
+<nav id="tabs" class="tabbar" hidden aria-label="Sections">
+  <button type="button" class="tab" data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+  <button type="button" class="tab" data-tab="library"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="16" rx="1"/><path d="m17.5 5.2 3.4 14.1"/></svg>Library</button>
+  <button type="button" class="tab" data-tab="upcoming"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Upcoming</button>
+  <button type="button" class="tab" data-tab="downloads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Downloads</button>
+</nav>
 <script src="app.js"></script>
 </body>
 </html>
