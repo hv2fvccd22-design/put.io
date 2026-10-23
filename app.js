@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v30';
+  const APP_VERSION = 'v31';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -1259,7 +1259,10 @@
   const redirEl = document.querySelector('#redir');
   const clientEl = document.querySelector('#client-input');
   redirEl.textContent = redirectUri();
-  clientEl.value = store.get(KEY_CLIENT) || '';
+  // Default put.io app (client ID 9924, callback = this page). Not a secret: it only names
+  // the app; each person signs in with their own put.io account. Still editable.
+  const DEFAULT_CLIENT_ID = '9924';
+  clientEl.value = store.get(KEY_CLIENT) || DEFAULT_CLIENT_ID;
 
   document.querySelector('#connect-form').addEventListener('submit', (e) => {
     e.preventDefault();
