@@ -168,6 +168,13 @@
   .cw .tag { position: absolute; top: 6px; left: 6px; font-size: .65rem; font-weight: 700; background: rgba(0,0,0,.7); color: #fdce45; padding: 2px 6px; border-radius: 4px; }
   .cw .t1 { font-size: .85rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cw .t2 { font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pc { flex: 0 0 116px; display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; position: relative; }
+  .pc .pimg .pbar { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgba(0,0,0,.55); z-index: 1; }
+  .pc .pimg .pbar i { display: block; height: 100%; background: #fdce45; }
+  .pc .pimg .tag { position: absolute; top: 6px; left: 6px; z-index: 1; font-size: .6rem; font-weight: 700; background: rgba(0,0,0,.75); color: #fdce45; padding: 2px 5px; border-radius: 4px; }
+  .pc .mark { position: absolute; top: 6px; right: 6px; z-index: 2; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.65); border: 1px solid rgba(255,255,255,.35); color: #fff; font-size: .85rem; display: flex; align-items: center; justify-content: center; }
+  .pc .mark:hover { background: var(--accent); color: var(--accent-ink); }
+  .pc .tname { font-size: .8rem; }
   .hscroll .tile { flex: 0 0 116px; display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; }
   .grouphdr { padding: 8px 14px 4px; font-size: .75rem; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--line); }
   .up-day { font-weight: 650; margin: 14px 0 4px; }
@@ -340,6 +347,7 @@
       </div>
       <div class="actions">
         <button id="restart">Start over</button>
+        <button id="markplayed">Mark played</button>
         <button id="next" hidden>Next &#9654;</button>
         <button id="save" hidden>Save offline</button>
         <a id="download" class="btn" href="#" rel="noopener">Download</a>

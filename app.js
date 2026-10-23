@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v44';
+  const APP_VERSION = 'v45';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -163,7 +163,7 @@
   }
   function historyArt(id, url) {
     const h = hist(), it = h.find((x) => x.id === id);
-    if (it && (!it.img || it.file_type === 'AUDIO')) { it.art = url; saveHist(h); }
+    if (it && !it.art) { it.art = url; saveHist(h); }
   }
   function historyFinished(id, next) {
     const h = hist(), it = h.find((x) => x.id === id);
@@ -229,22 +229,64 @@
   });
   const continueItems = () => hist().filter((x) => !x.finished && (x.upnext || ((x.pos || 0) > MIN_SAVE_SECONDS && (!x.dur || x.pos < x.dur - 30))))
     .sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 24);
+  // Progress card: poster (IMDb for TV/films, cover for audio), how far, and ✓ to mark played.
   function cwCard(it) {
-    const b = document.createElement('button'); b.type = 'button'; b.className = 'cw';
-    const th = document.createElement('div'); th.className = 'thumb' + (it.img ? '' : ' square');
-    const src = it.img || it.art;
-    if (src && posterOk(src)) th.appendChild(Object.assign(document.createElement('img'), { src, alt: '', loading: 'lazy' }));
-    if (it.upnext) th.appendChild(Object.assign(document.createElement('span'), { className: 'tag', textContent: 'UP NEXT' }));
-    if (!it.upnext && it.dur) { const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); fill.style.width = `${Math.min(100, Math.round((it.pos / it.dur) * 100))}%`; bar.appendChild(fill); th.appendChild(bar); }
-    const p = parseRelease(it.name), show = (it.path[2] && it.path[2].name) || (it.path[it.path.length - 1] || {}).name || '';
-    const t1 = document.createElement('div'); t1.className = 't1';
-    const t2 = document.createElement('div'); t2.className = 't2';
-    const where = it.upnext ? '' : it.dur ? ' · ' + fmtTime(Math.max(0, it.dur - it.pos)) + ' left' : it.pos ? ' · at ' + fmtTime(it.pos) : '';
-    if (p.season != null) { t1.textContent = parseRelease(show).title || p.title; t2.textContent = `S${p.season}E${p.episode}${where}`; }
-    else { t1.textContent = it.name.replace(/\.[a-z0-9]{2,4}$/i, ''); t2.textContent = ((it.path[it.path.length - 1] || {}).name || '') + where; }
-    b.append(th, t1, t2);
+    const card = document.createElement('div'); card.className = 'pc';
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'tile'; b.style.cssText = 'display:flex;flex-direction:column;gap:6px;background:none;border:0;padding:0;text-align:left';
+    const p = parseRelease(it.name), showName = (it.path[2] && it.path[2].name) || '';
+    const isEp = p.season != null;
+    const label = isEp ? (parseRelease(showName).title || p.title)
+      : it.file_type === 'AUDIO' ? it.name.replace(/\.[a-z0-9]{2,4}$/i, '') : (p.title || it.name);
+    const box = document.createElement('div'); box.className = 'pimg'; box.textContent = label;
+    const art = it.art || (it.file_type === 'AUDIO' ? '' : '');
+    if (art && posterOk(art)) box.appendChild(Object.assign(document.createElement('img'), { src: art, alt: '', loading: 'lazy' }));
+    else if (it.file_type === 'AUDIO' && navigator.onLine) {
+      (async () => {
+        try {
+          const dirs = it.path.slice(2).reverse(); // album/CD folder first, then its parent
+          for (const d of dirs) {
+            const cover = folderCover(((await api('/files/list', { params: { parent_id: d.id, per_page: 200 } })).files) || []);
+            if (cover) { if (box.isConnected) box.appendChild(Object.assign(document.createElement('img'), { src: cover, alt: '' })); historyArt(it.id, cover); break; }
+          }
+        } catch (e) { /* no cover */ }
+      })();
+    } else if (it.file_type !== 'AUDIO' && store.get(KEY_OMDB)) {
+      // look up the show/film poster (cached by omdb())
+      const q = parseRelease(isEp ? showName || it.name : (it.path.length > 2 ? it.path[it.path.length - 1].name : it.name));
+      (async () => {
+        try {
+          const r = await omdb({ t: q.title, y: q.year, type: isEp ? 'series' : 'movie' }) || await omdb({ t: q.title, y: q.year });
+          const url = r && na(r.Poster);
+          if (posterOk(url) && box.isConnected) { box.appendChild(Object.assign(document.createElement('img'), { src: url, alt: '' })); historyArt(it.id, url); }
+        } catch (e) { /* no poster */ }
+      })();
+    }
+    if (it.upnext) box.appendChild(Object.assign(document.createElement('span'), { className: 'tag', textContent: 'UP NEXT' }));
+    else if (it.dur || it.pos) {
+      const bar = document.createElement('div'); bar.className = 'pbar'; const fill = document.createElement('i');
+      fill.style.width = `${it.dur ? Math.min(100, Math.round((it.pos / it.dur) * 100)) : 8}%`;
+      bar.appendChild(fill); box.appendChild(bar);
+    }
+    const nm = document.createElement('div'); nm.className = 'tname'; nm.textContent = label;
+    const meta = document.createElement('div'); meta.className = 'tmeta';
+    const far = it.upnext ? 'Up next' : it.dur ? `${Math.min(100, Math.round((it.pos / it.dur) * 100))}%` : it.pos ? `at ${fmtTime(it.pos)}` : '';
+    meta.textContent = isEp ? `S${p.season}E${p.episode}${far ? ' · ' + far : ''}` : far;
+    b.append(box, nm, meta);
     b.addEventListener('click', () => resumeItem(it));
-    return b;
+    const mk = document.createElement('button'); mk.type = 'button'; mk.className = 'mark';
+    mk.textContent = '✓'; mk.title = it.upnext ? 'Dismiss' : 'Mark played'; mk.setAttribute('aria-label', `${mk.title}: ${label}`);
+    mk.addEventListener('click', (e) => { e.stopPropagation(); markPlayed(it.id); });
+    card.append(b, mk);
+    return card;
+  }
+  // Mark played: clear the saved position on put.io (so it's done everywhere) and drop it from the rows.
+  async function markPlayed(id) {
+    const h = hist(), it = h.find((x) => x.id === id);
+    if (it) { it.finished = true; it.upnext = false; it.pos = 0; saveHist(h); }
+    delete pending[id]; savePending();
+    if (!el.home.hidden) renderHome();
+    try { await position.reset(id, false); } catch (e) { if (e.auth) logout('Your token was rejected. Connect again.'); }
+    const f = files.find((x) => x.id === id); if (f) f.start_from = 0;
   }
   // Open a history item where it lives (so Next / covers work), then play it.
   async function resumeItem(it) {
@@ -1750,6 +1792,14 @@
   window.addEventListener('pagehide', () => saveNow(true));
   window.addEventListener('online', flushPending);
 
+  $('#markplayed').addEventListener('click', async () => {
+    if (!current) return;
+    const id = current.id;
+    lastSavedSecs = Math.floor(el.video.currentTime); // the pause below must not re-save it
+    el.video.pause(); current.start_from = 0;
+    await markPlayed(id);
+    setStatus('Marked as played. Saved position cleared.');
+  });
   el.restart.addEventListener('click', async () => {
     if (!current) return;
     el.video.currentTime = 0; el.video.play().catch(() => {});
