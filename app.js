@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v45';
+  const APP_VERSION = 'v46';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -138,6 +138,15 @@
     if (playerOpen) await closePlayer();
     goHome();
   });
+
+  /* ---------- played / unplayed (per device; put.io only stores positions) ---------- */
+  const KEY_PLAYED = 'resume.played';
+  let playedSet = (() => { try { return new Set(JSON.parse(store.get(KEY_PLAYED) || '[]')); } catch (e) { return new Set(); } })();
+  const isPlayed = (id) => playedSet.has(id);
+  function setPlayed(id, on) {
+    if (on) playedSet.add(id); else playedSet.delete(id);
+    store.set(KEY_PLAYED, JSON.stringify([...playedSet].slice(-3000)));
+  }
 
   /* ---------- watch history (for Continue watching / Up next) ---------- */
   // Per device: what you opened, where you got to, and the next episode when you finish one.
@@ -282,11 +291,28 @@
   // Mark played: clear the saved position on put.io (so it's done everywhere) and drop it from the rows.
   async function markPlayed(id) {
     const h = hist(), it = h.find((x) => x.id === id);
+    if (it && !it.upnext) setPlayed(id, true);
     if (it) { it.finished = true; it.upnext = false; it.pos = 0; saveHist(h); }
+    else setPlayed(id, true);
     delete pending[id]; savePending();
     if (!el.home.hidden) renderHome();
     try { await position.reset(id, false); } catch (e) { if (e.auth) logout('Your token was rejected. Connect again.'); }
     const f = files.find((x) => x.id === id); if (f) f.start_from = 0;
+    refreshPlayedUi();
+  }
+  // Mark unplayed: not played, no saved position: starts fresh from the beginning.
+  async function markUnplayed(id) {
+    setPlayed(id, false);
+    saveHist(hist().filter((x) => x.id !== id));
+    delete pending[id]; savePending();
+    const f = files.find((x) => x.id === id); if (f) f.start_from = 0;
+    refreshPlayedUi();
+    try { await position.reset(id, false); } catch (e) { if (e.auth) logout('Your token was rejected. Connect again.'); }
+  }
+  function refreshPlayedUi() {
+    if (current) el.markplayed.textContent = isPlayed(current.id) ? 'Mark unplayed' : 'Mark played';
+    if (!playerOpen && !el.browser.hidden && !searching) renderList();
+    if (!el.home.hidden) renderHome();
   }
   // Open a history item where it lives (so Next / covers work), then play it.
   async function resumeItem(it) {
@@ -1080,6 +1106,15 @@
         const r = document.createElement('span'); r.className = 'resume'; r.textContent = 'at ' + fmtTime(pos); m.prepend(r);
       }
       row.append(k, n, m);
+      if (isPlayable(f) && isPlayed(f.id)) n.classList.add('played');
+      if (isPlayable(f)) {
+        const pl = document.createElement('span');
+        pl.className = 'pl' + (isPlayed(f.id) ? ' on' : ''); pl.setAttribute('role', 'button'); pl.tabIndex = 0;
+        pl.title = isPlayed(f.id) ? 'Played (tap to mark unplayed)' : 'Mark played';
+        pl.setAttribute('aria-label', (isPlayed(f.id) ? 'Mark unplayed: ' : 'Mark played: ') + f.name);
+        pl.textContent = '✓';
+        row.appendChild(pl);
+      }
       if (f.file_type !== 'FOLDER') {
         const d = document.createElement('span');
         d.className = 'dl'; d.setAttribute('role', 'button'); d.tabIndex = 0;
@@ -1281,6 +1316,7 @@
     show('player');
     setTitle('');
     el.next.hidden = !nextFile();
+    if (el.markplayed) el.markplayed.textContent = isPlayed(f.id) ? 'Mark unplayed' : 'Mark played';
     setMediaSession({ title: f.name.replace(/\.[a-z0-9]{2,4}$/i, ''), artist: showFolderTitle() || stack[stack.length - 1].name, art: '' });
     el.ptitle.textContent = f.name;
     el.mp4.hidden = true;
@@ -1543,6 +1579,7 @@
     const om = offSupported && offMeta()[id];
     if (om && om.auto && om.done) deleteOffline(id);
     historyFinished(id, nextFile());
+    setPlayed(id, true);
     const n = el.playnext.checked ? nextFile() : null;
     if (n && current.id === id) { openFile(n, { next: true }); return; }
     setStatus('Finished. Position cleared.');
@@ -1792,9 +1829,11 @@
   window.addEventListener('pagehide', () => saveNow(true));
   window.addEventListener('online', flushPending);
 
-  $('#markplayed').addEventListener('click', async () => {
+  el.markplayed = $('#markplayed');
+  el.markplayed.addEventListener('click', async () => {
     if (!current) return;
     const id = current.id;
+    if (isPlayed(id)) { await markUnplayed(id); setStatus('Marked as unplayed. It will start from the beginning.'); return; }
     lastSavedSecs = Math.floor(el.video.currentTime); // the pause below must not re-save it
     el.video.pause(); current.start_from = 0;
     await markPlayed(id);
@@ -1866,9 +1905,10 @@
     }
   }
   el.list.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && (e.target.classList.contains('dl') || e.target.classList.contains('del'))) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && (e.target.classList.contains('dl') || e.target.classList.contains('del') || e.target.classList.contains('pl'))) {
       e.preventDefault(); e.stopPropagation();
       const f = files[Number(e.target.closest('.row').dataset.index)]; if (!f) return;
+      if (e.target.classList.contains('pl')) { if (isPlayed(f.id)) markUnplayed(f.id); else markPlayed(f.id); return; }
       if (e.target.classList.contains('del')) deleteFile(f); else startDownload(f);
     }
   });
@@ -1879,6 +1919,7 @@
     const f = files[Number(row.dataset.index)]; if (!f) return;
     if (e.target.closest('.dl')) { e.stopPropagation(); startDownload(f); return; }
     if (e.target.closest('.del')) { e.stopPropagation(); deleteFile(f); return; }
+    if (e.target.closest('.pl')) { e.stopPropagation(); if (isPlayed(f.id)) markUnplayed(f.id); else markPlayed(f.id); return; }
     if (f.file_type === 'FOLDER') enterFolder(f);
     else if (isPlayable(f)) { openFile(f); if (f.file_type === 'VIDEO' && el.autofs.checked) goFullscreen(); }
     else api(`/files/${f.id}/url`).then((r) => { window.open(r.url, '_blank', 'noopener'); }).catch(() => {});
