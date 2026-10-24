@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v50';
+  const APP_VERSION = 'v51';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -1116,6 +1116,7 @@
       }
       row.append(k, n, m);
       if (isPlayable(f) && isPlayed(f.id)) n.classList.add('played');
+      if (isLost(f.id)) { n.classList.add('lost'); n.title = 'Lost on put.io (FILE_LOST): cannot be played'; }
       if (isPlayable(f)) {
         const pl = document.createElement('span');
         pl.className = 'pl' + (isPlayed(f.id) ? ' on' : ''); pl.setAttribute('role', 'button'); pl.tabIndex = 0;
@@ -1304,15 +1305,20 @@
 
   /* ---------- player ---------- */
   // The next playable file after the current one, in the folder's list order.
+  // Files put.io reports as lost (HTTP 410 FILE_LOST): never picked as "next" again.
+  const KEY_LOST = 'resume.lost';
+  let lostSet = (() => { try { return new Set(JSON.parse(store.get(KEY_LOST) || '[]')); } catch (e) { return new Set(); } })();
+  function markLost(id) { lostSet.add(id); store.set(KEY_LOST, JSON.stringify([...lostSet].slice(-2000))); }
+  const isLost = (id) => lostSet.has(id);
   function nextFile() {
     const i = current ? files.indexOf(current) : -1;
     if (i < 0) return null;
     if (shuffleActive()) {
       const q = shuffleQueue.indexOf(current.id);
-      for (let k = q + 1; k > 0 && k < shuffleQueue.length; k++) { const f = files.find((x) => x.id === shuffleQueue[k]); if (f) return f; }
+      for (let k = q + 1; k > 0 && k < shuffleQueue.length; k++) { const f = files.find((x) => x.id === shuffleQueue[k]); if (f && !isLost(f.id)) return f; }
       return null;
     }
-    return files.slice(i + 1).find(isPlayable) || null;
+    return files.slice(i + 1).find((f) => isPlayable(f) && !isLost(f.id)) || null;
   }
 
   /* ---------- shuffle (audio) ---------- */
@@ -1342,7 +1348,7 @@
   let shuffleOn = store.get(KEY_SHUFFLE) === 'on', shuffleQueue = [];
   const shuffleActive = () => shuffleOn && current && current.file_type === 'AUDIO' && shuffleQueue.includes(current.id);
   function buildShuffle(firstId) {
-    const ids = files.filter((f) => f.file_type === 'AUDIO').map((f) => f.id).filter((id) => id !== firstId);
+    const ids = files.filter((f) => f.file_type === 'AUDIO' && !isLost(f.id)).map((f) => f.id).filter((id) => id !== firstId);
     for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
     shuffleQueue = firstId != null ? [firstId, ...ids] : ids;
   }
@@ -1368,12 +1374,12 @@
     sb.textContent = left ? '⤓ Save all offline' : '⤓ All saved';
   }
   $('#playall').addEventListener('click', () => {
-    const first = files.find((f) => f.file_type === 'AUDIO'); if (!first) return;
+    const first = files.find((f) => f.file_type === 'AUDIO' && !isLost(f.id)); if (!first) return;
     shuffleOn = false; store.set(KEY_SHUFFLE, 'off');
     openFile(first, { next: true });
   });
   $('#shuffleall').addEventListener('click', () => {
-    const tracks = files.filter((f) => f.file_type === 'AUDIO'); if (!tracks.length) return;
+    const tracks = files.filter((f) => f.file_type === 'AUDIO' && !isLost(f.id)); if (!tracks.length) return;
     const first = tracks[Math.floor(Math.random() * tracks.length)];
     shuffleOn = true; store.set(KEY_SHUFFLE, 'on');
     buildShuffle(first.id);
@@ -1444,6 +1450,15 @@
       el.vlc.hidden = true; // Open in VLC button turned off; formats fall back automatically instead
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
+      // 410 = put.io lost the file (FILE_LOST): nothing can play it. Remember it, and if we're
+      // playing on (shuffle / Play next / Next), skip straight to the next track.
+      if (e.status === 410) {
+        markLost(f.id);
+        const n = nextFile();
+        if (n && (forcePlay || el.playnext.checked)) { setStatus('Lost on put.io, skipped.', 'warn'); openFile(n, { next: true }); return; }
+        setStatus('This file was lost on put.io (FILE_LOST). It can\'t be played; delete it or get it again.', 'bad');
+        return;
+      }
       setStatus(`Could not get a stream link (${e.message}).`, 'bad');
       return;
     }
