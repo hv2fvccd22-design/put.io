@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v47';
+  const APP_VERSION = 'v48';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -571,6 +571,28 @@
     }, 350);
   });
 
+  /* ---------- episode titles for TV files ("S2 E8 · The Basic Oneness of Everything") ---------- */
+  let epNames = { show: null, map: null }; // map "s-e" -> title for the show on screen
+  function epLabel(f) {
+    if (f.file_type !== 'VIDEO' || !isTvSection() || stack.length < 3) return null;
+    const p = parseRelease(f.name);
+    if (p.season == null || p.episode == null) return null;
+    const t = epNames.show === showFolderTitle() && epNames.map ? epNames.map.get(`${p.season}-${p.episode}`) : null;
+    return `S${p.season} E${p.episode} · ${t || 'Episode ' + p.episode}`;
+  }
+  async function loadEpNames() {
+    const show = showFolderTitle();
+    if (!show || !isTvSection() || (epNames.show === show && epNames.map)) return false;
+    epNames = { show, map: null };
+    try {
+      const id = await matchShow(show); if (!id) return false;
+      const s = await showEpisodes(id); if (!s) return false;
+      if (epNames.show !== show) return false;
+      epNames.map = new Map(s.eps.filter((e) => e.name && !/^episode \d+$/i.test(e.name)).map((e) => [`${e.s}-${e.n}`, e.name]));
+      return true;
+    } catch (e) { return false; }
+  }
+
   /* ---------- search (whole put.io account) ---------- */
   let searching = false, results = [], searchSeq = 0, searchTimer = null;
   function openSearch() {
@@ -908,6 +930,14 @@
       }
       renderList();
       loadFolderInfo();
+      if (isTvSection() && stack.length >= 3) loadEpNames().then((ok) => {
+        if (!ok) return;
+        if (!playerOpen && !searching && stack[stack.length - 1].id === id) renderList();
+        if (playerOpen && current) { // the player opened before the titles arrived
+          const lbl = epLabel(current), showT = parseRelease(showFolderTitle() || '').title;
+          if (lbl) { el.ptitle.textContent = `${showT} · ${lbl}`; setMediaSession({ title: lbl, artist: showT }); }
+        }
+      });
     } catch (e) {
       if (e.auth) return logout('Your token was rejected. Connect again.');
       el.list.innerHTML = ''; el.list.classList.remove('grid');
@@ -1071,7 +1101,10 @@
       const row = document.createElement('button');
       row.type = 'button'; row.className = 'row'; row.dataset.index = String(i);
       const k = kindIcon(f);
-      const n = document.createElement('span'); n.className = 'name'; n.textContent = f.name;
+      const n = document.createElement('span'); n.className = 'name';
+      const lbl = epLabel(f);
+      n.textContent = lbl || f.name;
+      if (lbl) { n.title = f.name; n.classList.add('ep'); }
       const sv = offSupported && offMeta()[f.id];
       if (sv) { const s = document.createElement('span'); s.className = 'saved'; s.textContent = sv.done ? '⤓ saved' : '⤓ saving'; n.appendChild(s); }
       const m = document.createElement('span'); m.className = 'meta';
@@ -1292,8 +1325,10 @@
     setTitle('');
     el.next.hidden = !nextFile();
     if (el.markplayed) el.markplayed.textContent = isPlayed(f.id) ? 'Mark unplayed' : 'Mark played';
-    setMediaSession({ title: f.name.replace(/\.[a-z0-9]{2,4}$/i, ''), artist: showFolderTitle() || stack[stack.length - 1].name, art: '' });
-    el.ptitle.textContent = f.name;
+    const lbl = epLabel(f), showT = parseRelease(showFolderTitle() || '').title;
+    setMediaSession({ title: lbl || f.name.replace(/\.[a-z0-9]{2,4}$/i, ''), artist: showT || showFolderTitle() || stack[stack.length - 1].name, art: '' });
+    el.ptitle.textContent = lbl ? `${showT} · ${lbl}` : f.name;
+    el.ptitle.title = f.name;
     el.mp4.hidden = true;
     destroyHls();
     clearSubtitles();
