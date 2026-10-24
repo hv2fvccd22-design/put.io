@@ -1,6 +1,6 @@
 // App-shell cache only. API calls and video streams are never touched.
 // Bump CACHE on every release: that is what makes installed copies update.
-const CACHE = 'resume-shell-v52';
+const CACHE = 'resume-shell-v53';
 // Artwork (podcast covers from put.io, IMDb posters) kept across app versions.
 const IMG_CACHE = 'resume-img';
 const IMG_MAX = 400;
@@ -28,7 +28,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
-  if (req.method === 'GET' && isArtwork(url)) { e.respondWith(artwork(req)); return; }
+  if (req.method === 'GET' && (isArtwork(url) || (req.destination === 'image' && url.hostname === 'api.put.io' && /^\/v2\/files\/\d+\/download$/.test(url.pathname)))) { e.respondWith(artwork(req)); return; }
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   // Cache first: the app opens instantly, also offline or on a weak signal. Updates come
   // from the browser checking sw.js on each open; a new version installs in the

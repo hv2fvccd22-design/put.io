@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v52';
+  const APP_VERSION = 'v53';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -1266,10 +1266,17 @@
   // folders; podcasts, music etc. get their folder's own cover image instead.
   const isFilmTvSection = () => stack.length > 1 && /^(movies?|films?|tv( shows?)?|series)$/i.test(stack[1].name.trim());
   // put.io gives image files a token-free preview link ("screenshot").
+  // The folder's cover image. Uses the image file itself (put.io doesn't always make a
+  // preview for uploaded images, e.g. covers added by the gPodder sync); only very large
+  // images fall back to put.io's preview.
   function folderCover(list) {
-    const imgs = list.filter((f) => f.file_type === 'IMAGE' && (f.screenshot || f.icon));
+    const imgs = list.filter((f) => f.file_type === 'IMAGE');
     const pick = imgs.find((f) => /^(cover|folder|poster|artwork|front)\./i.test(f.name)) || imgs[0];
-    return pick ? (pick.screenshot || pick.icon) : '';
+    if (!pick) return '';
+    if ((pick.size || 0) > 1500000 && (pick.screenshot || pick.icon)) return pick.screenshot || pick.icon;
+    const u = new URL(`${API}/files/${pick.id}/download`);
+    u.searchParams.set('oauth_token', token);
+    return u.toString();
   }
 
   // Card at the top of a folder: IMDb details for a show/film, or the cover image elsewhere.
