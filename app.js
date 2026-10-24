@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v48';
+  const APP_VERSION = 'v49';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -600,7 +600,7 @@
     if (playerOpen) return; // search from the folder screens
     if (el.browser.hidden) show('browser'); // results show in the folder view
     searching = true;
-    $('#addbar').hidden = true;
+    $('#addbar').hidden = true; $('#playbar').hidden = true;
     el.searchbar.hidden = false; el.searchbtn.setAttribute('aria-expanded', 'true');
     el.q.focus();
     if (el.q.value.trim().length >= 2) runSearch();
@@ -1075,6 +1075,7 @@
   }
 
   function renderList() {
+    if ($('#playbar')) updatePlaybar();
     // While search is open the list shows results; background refreshes mustn't replace them.
     if (searching) { renderResults(results.length ? '' : (el.q.value.trim().length >= 2 ? 'Nothing found.' : 'Type to search.')); return; }
     renderCrumbs();
@@ -1306,8 +1307,53 @@
   function nextFile() {
     const i = current ? files.indexOf(current) : -1;
     if (i < 0) return null;
+    if (shuffleActive()) {
+      const q = shuffleQueue.indexOf(current.id);
+      for (let k = q + 1; k > 0 && k < shuffleQueue.length; k++) { const f = files.find((x) => x.id === shuffleQueue[k]); if (f) return f; }
+      return null;
+    }
     return files.slice(i + 1).find(isPlayable) || null;
   }
+
+  /* ---------- shuffle (audio) ---------- */
+  // Remembered per device. The queue is the folder's tracks in random order, current first.
+  const KEY_SHUFFLE = 'resume.shuffle';
+  let shuffleOn = store.get(KEY_SHUFFLE) === 'on', shuffleQueue = [];
+  const shuffleActive = () => shuffleOn && current && current.file_type === 'AUDIO' && shuffleQueue.includes(current.id);
+  function buildShuffle(firstId) {
+    const ids = files.filter((f) => f.file_type === 'AUDIO').map((f) => f.id).filter((id) => id !== firstId);
+    for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    shuffleQueue = firstId != null ? [firstId, ...ids] : ids;
+  }
+  function setShuffle(on) {
+    shuffleOn = on; store.set(KEY_SHUFFLE, on ? 'on' : 'off');
+    if (on && current) buildShuffle(current.id);
+    updateShuffleBtn();
+  }
+  function updateShuffleBtn() {
+    const b = $('#shuffle'); if (!b) return;
+    b.hidden = !current || current.file_type !== 'AUDIO';
+    b.setAttribute('aria-pressed', String(!!shuffleOn));
+    el.next.hidden = !nextFile();
+  }
+  $('#shuffle').addEventListener('click', () => setShuffle(!shuffleOn));
+  // Folder buttons: Play all (in order) / Shuffle (random start, random order).
+  function updatePlaybar() {
+    const tracks = files.filter((f) => f.file_type === 'AUDIO');
+    $('#playbar').hidden = searching || tracks.length < 2 || gridMode();
+  }
+  $('#playall').addEventListener('click', () => {
+    const first = files.find((f) => f.file_type === 'AUDIO'); if (!first) return;
+    shuffleOn = false; store.set(KEY_SHUFFLE, 'off');
+    openFile(first, { next: true });
+  });
+  $('#shuffleall').addEventListener('click', () => {
+    const tracks = files.filter((f) => f.file_type === 'AUDIO'); if (!tracks.length) return;
+    const first = tracks[Math.floor(Math.random() * tracks.length)];
+    shuffleOn = true; store.set(KEY_SHUFFLE, 'on');
+    buildShuffle(first.id);
+    openFile(first, { next: true });
+  });
 
   let forcePlay = false; // playing on from the previous file: start even if Auto-start is off
   let playerFrom = 'browser'; // the screen Back returns to
@@ -1323,7 +1369,8 @@
     playerOpen = true;
     show('player');
     setTitle('');
-    el.next.hidden = !nextFile();
+    if (f.file_type === 'AUDIO' && shuffleOn && !shuffleQueue.includes(f.id)) buildShuffle(f.id);
+    updateShuffleBtn();
     if (el.markplayed) el.markplayed.textContent = isPlayed(f.id) ? 'Mark unplayed' : 'Mark played';
     const lbl = epLabel(f), showT = parseRelease(showFolderTitle() || '').title;
     setMediaSession({ title: lbl || f.name.replace(/\.[a-z0-9]{2,4}$/i, ''), artist: showT || showFolderTitle() || stack[stack.length - 1].name, art: '' });

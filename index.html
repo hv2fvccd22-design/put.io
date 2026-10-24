@@ -153,6 +153,8 @@
   .menusep { border: 0; border-top: 1px solid var(--line); margin: 4px 8px; }
   .searchbar { margin-bottom: 12px; }
   .addbar { margin-bottom: 12px; }
+  .playbar { margin: 0 0 12px; }
+  #shuffle[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
   /* bottom tab bar (Plex-style) */
   body.has-tabs { padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
   .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; justify-content: space-around; background: var(--surface); border-top: 1px solid var(--line); padding: 6px 0 calc(6px + env(safe-area-inset-bottom, 0px)); }
@@ -301,6 +303,10 @@
 
     <section id="browser" hidden>
       <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+      <div id="playbar" class="actions playbar" hidden>
+        <button type="button" id="playall" class="primary small">&#9654; Play all</button>
+        <button type="button" id="shuffleall" class="small">&#128256; Shuffle</button>
+      </div>
       <div id="addbar" class="addbar" hidden>
         <button type="button" id="addbtn" class="small">+ Add download here</button>
         <form id="addform" class="addform" hidden>
@@ -356,6 +362,7 @@
       <div class="actions">
         <button id="restart">Start over</button>
         <button id="markplayed">Mark played</button>
+        <button id="shuffle" hidden aria-pressed="false">&#128256; Shuffle</button>
         <button id="next" hidden>Next &#9654;</button>
         <button id="save" hidden>Save offline</button>
         <a id="download" class="btn" href="#" rel="noopener">Download</a>
