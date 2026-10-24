@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v49';
+  const APP_VERSION = 'v50';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -1318,6 +1318,27 @@
   /* ---------- shuffle (audio) ---------- */
   // Remembered per device. The queue is the folder's tracks in random order, current first.
   const KEY_SHUFFLE = 'resume.shuffle';
+  const KEY_MUSICOFF = 'resume.musicoff';
+  // Global: keep every music track you play on the phone (podcasts excluded). Off unless switched on.
+  const musicOffEl = $('#musicoff');
+  musicOffEl.checked = store.get(KEY_MUSICOFF) === 'on';
+  musicOffEl.addEventListener('change', () => store.set(KEY_MUSICOFF, musicOffEl.checked ? 'on' : 'off'));
+  const isMusicTrack = (f) => f && f.file_type === 'AUDIO' && !isPodcastSection();
+  const KEY_PODOFF = 'resume.podoff';
+  const podOffEl = $('#podoff');
+  podOffEl.checked = store.get(KEY_PODOFF) === 'on';
+  podOffEl.addEventListener('change', () => store.set(KEY_PODOFF, podOffEl.checked ? 'on' : 'off'));
+  // Keep this track permanently? (music or podcast, per its own setting)
+  const keepOffline = (f) => f && f.file_type === 'AUDIO' && (isPodcastSection() ? podOffEl.checked : musicOffEl.checked);
+  // Folder button: save every track here for offline (queued, one at a time).
+  $('#saveall').addEventListener('click', () => {
+    const tracks = files.filter((f) => f.file_type === 'AUDIO' && offSource(f) && !offMeta()[f.id]);
+    const b = $('#saveall');
+    if (!offSupported) { b.textContent = 'Offline saving not supported here'; return; }
+    if (!tracks.length) { b.textContent = '⤓ All saved'; return; }
+    tracks.forEach((f) => saveOffline(f));
+    b.textContent = `⤓ Saving ${tracks.length}…`;
+  });
   let shuffleOn = store.get(KEY_SHUFFLE) === 'on', shuffleQueue = [];
   const shuffleActive = () => shuffleOn && current && current.file_type === 'AUDIO' && shuffleQueue.includes(current.id);
   function buildShuffle(firstId) {
@@ -1341,6 +1362,10 @@
   function updatePlaybar() {
     const tracks = files.filter((f) => f.file_type === 'AUDIO');
     $('#playbar').hidden = searching || tracks.length < 2 || gridMode();
+    const sb = $('#saveall');
+    sb.hidden = !offSupported;
+    const left = tracks.filter((f) => !(offMeta()[f.id] && offMeta()[f.id].done)).length;
+    sb.textContent = left ? '⤓ Save all offline' : '⤓ All saved';
   }
   $('#playall').addEventListener('click', () => {
     const first = files.find((f) => f.file_type === 'AUDIO'); if (!first) return;
@@ -1431,7 +1456,8 @@
     playKind(0, start > MIN_SAVE_SECONDS ? `Resuming at ${fmtTime(start)}` : 'Ready');
     // Buffer ahead for audio: save the whole file to the phone (kept for re-opens,
     // tidied up automatically); playback moves to it once it's complete.
-    if (f.file_type === 'AUDIO' && el.bufahead.checked && offSupported && offSource(f)) saveOffline(f, { auto: true });
+    if (keepOffline(f) && offSupported && offSource(f)) saveOffline(f);
+    else if (f.file_type === 'AUDIO' && el.bufahead.checked && offSupported && offSource(f)) saveOffline(f, { auto: true });
     if (f.file_type === 'VIDEO' && isFilmTvSection()) loadSubtitles(f);
   }
 

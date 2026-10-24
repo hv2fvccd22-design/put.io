@@ -261,6 +261,8 @@
     <label class="toggle"><input type="checkbox" id="flatten"> Show all episodes in a show (skip season folders)</label>
     <label class="toggle"><input type="checkbox" id="grid"> Poster grid for Movies and TV Shows</label>
     <label class="toggle"><input type="checkbox" id="hidenp"> Hide non-playable files (images, .nfo, .txt…)</label>
+    <label class="toggle"><input type="checkbox" id="musicoff"> Save music offline as you play it</label>
+    <label class="toggle"><input type="checkbox" id="podoff"> Save podcasts offline as you play them</label>
     <label class="toggle"><input type="checkbox" id="bufahead"> Buffer ahead for patchy signal</label>
     <p class="small muted" style="margin:0">Video: plays through the put.io stream and keeps up to 5 min loaded ahead. Audio: saves the whole file to the phone while you listen (kept if you come back to it, removed once finished; the 5 newest are kept). Takes effect on the next file you open.</p>
     <div class="stack" style="gap:8px">
@@ -306,6 +308,7 @@
       <div id="playbar" class="actions playbar" hidden>
         <button type="button" id="playall" class="primary small">&#9654; Play all</button>
         <button type="button" id="shuffleall" class="small">&#128256; Shuffle</button>
+        <button type="button" id="saveall" class="small ghost">&#10515; Save all offline</button>
       </div>
       <div id="addbar" class="addbar" hidden>
         <button type="button" id="addbtn" class="small">+ Add download here</button>
