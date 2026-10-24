@@ -156,6 +156,15 @@
   .addbar { margin-bottom: 12px; }
   .playbar { margin: 0 0 12px; }
   #shuffle[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  /* now-playing bar for music that keeps playing while you browse */
+  .mini { position: fixed; left: 8px; right: 8px; bottom: calc(66px + env(safe-area-inset-bottom, 0px)); z-index: 21; display: flex; align-items: center; gap: 6px; padding: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+  .mini-open { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 10px; background: none; border: 0; padding: 0; text-align: left; }
+  .mini-open img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; flex: none; }
+  .mini-text { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+  .mini-text b, .mini-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mini-text small { color: var(--muted); font-size: .75rem; }
+  .mini-btn { width: 40px; height: 40px; padding: 0; border-radius: 50%; background: none; border: 0; font-size: 1rem; flex: none; }
+  body.has-mini { padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px)); }
   /* bottom tab bar (Plex-style) */
   body.has-tabs { padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
   .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; justify-content: space-around; background: var(--surface); border-top: 1px solid var(--line); padding: 6px 0 calc(6px + env(safe-area-inset-bottom, 0px)); }
@@ -386,6 +395,15 @@
   <footer id="ver" class="ver"></footer>
 </div>
 
+<div id="mini" class="mini" hidden>
+  <button type="button" id="mini-open" class="mini-open" aria-label="Open player">
+    <img id="mini-art" alt="" hidden>
+    <span class="mini-text"><b id="mini-title"></b><small id="mini-sub"></small></span>
+  </button>
+  <button type="button" id="mini-pp" class="mini-btn" aria-label="Play or pause">&#10074;&#10074;</button>
+  <button type="button" id="mini-next" class="mini-btn" aria-label="Next track">&#9197;</button>
+  <button type="button" id="mini-stop" class="mini-btn" aria-label="Stop">&#10005;</button>
+</div>
 <nav id="tabs" class="tabbar" hidden aria-label="Sections">
   <button type="button" class="tab" data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
   <button type="button" class="tab" data-tab="library"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="16" rx="1"/><path d="m17.5 5.2 3.4 14.1"/></svg>Library</button>

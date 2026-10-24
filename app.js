@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v51';
+  const APP_VERSION = 'v52';
   const API = 'https://api.put.io/v2';
   const KEY_TOKEN = 'resume.token';
   const KEY_PENDING = 'resume.pending';
@@ -160,8 +160,10 @@
     if (i >= 0) h.splice(i, 1);
     h.unshift(merged); saveHist(h);
   }
+  // Music (audio outside podcasts / audio books) isn't tracked for Now playing.
+  const isMusicPath = (file_type, path) => file_type === 'AUDIO' && !(path && path[1] && /podcast|audio ?books?/i.test(path[1].name));
   function recordHistory(f) {
-    if (!isPlayable(f)) return;
+    if (!isPlayable(f) || isMusicPath(f.file_type, stack)) return;
     upsertHist({ id: f.id, name: f.name, file_type: f.file_type, path: stack.map((s) => ({ id: s.id, name: s.name })),
       img: f.screenshot || (hist().find((x) => x.id === f.id) || {}).img || '', at: Date.now(), finished: false, upnext: false });
   }
@@ -236,7 +238,7 @@
     else if (t.dataset.tab === 'upcoming') openUpcoming();
     else if (t.dataset.tab === 'downloads') toggleDownloads(el.downloads.hidden);
   });
-  const continueItems = () => hist().filter((x) => !x.finished && (x.upnext || ((x.pos || 0) > MIN_SAVE_SECONDS && (!x.dur || x.pos < x.dur - 30))))
+  const continueItems = () => hist().filter((x) => !isMusicPath(x.file_type, x.path) && !x.finished && (x.upnext || ((x.pos || 0) > MIN_SAVE_SECONDS && (!x.dur || x.pos < x.dur - 30))))
     .sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 24);
   // Progress card: poster (IMDb for TV/films, cover for audio), how far, and ✓ to mark played.
   function cwCard(it) {
@@ -288,6 +290,51 @@
     card.append(b, mk);
     return card;
   }
+  /* ---------- now-playing bar: music keeps going while you browse ---------- */
+  function returnToBrowsing() {
+    if (playerFrom === 'home') { show('home'); renderHome(); }
+    else if (playerFrom === 'upcoming') show('upcoming');
+    else { show('browser'); renderList(); }
+  }
+  function minimizePlayer() {
+    mini = true; playerOpen = false;
+    returnToBrowsing();
+    updateMini();
+  }
+  async function stopPlayback() {
+    await saveNow(false);
+    mini = false;
+    revokeLocal();
+    el.video.pause(); destroyHls(); clearSubtitles();
+    el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load();
+    current = null;
+    updateMini();
+    if (!el.browser.hidden && !searching) renderList();
+  }
+  function updateMini() {
+    const m = $('#mini'); if (!m) return;
+    const on = mini && !!current && !playerOpen && !!token;
+    m.hidden = !on; document.body.classList.toggle('has-mini', on);
+    if (!on) return;
+    const art = el.video.getAttribute('poster');
+    const img = $('#mini-art'); if (art) { img.src = art; img.hidden = false; } else img.hidden = true;
+    $('#mini-title').textContent = current.name.replace(/\.[a-z0-9]{2,4}$/i, '');
+    $('#mini-sub').textContent = playlistName;
+    $('#mini-pp').innerHTML = el.video.paused ? '&#9654;' : '&#10074;&#10074;';
+    $('#mini-next').hidden = !nextFile();
+  }
+  $('#mini-open').addEventListener('click', () => {
+    if (!current) return;
+    playerFrom = !el.home.hidden ? 'home' : !el.upcoming.hidden ? 'upcoming' : 'browser';
+    mini = false; playerOpen = true;
+    history.pushState({ d: stack.length, p: 1 }, '');
+    show('player'); setTitle(''); updateMini();
+  });
+  $('#mini-pp').addEventListener('click', () => { if (el.video.paused) el.video.play().catch(() => {}); else el.video.pause(); });
+  $('#mini-next').addEventListener('click', () => { if (nextFile()) playNext(); });
+  $('#mini-stop').addEventListener('click', stopPlayback);
+  ['play', 'pause', 'ended', 'loadedmetadata'].forEach((ev) => el.video.addEventListener(ev, updateMini));
+
   // Mark played: clear the saved position on put.io (so it's done everywhere) and drop it from the rows.
   async function markPlayed(id) {
     const h = hist(), it = h.find((x) => x.id === id);
@@ -357,7 +404,7 @@
       const root = await api('/files/list', { params: { parent_id: 0, per_page: 1000 } });
       const picked = rootPicks();
       const scanLibs = (root.files || []).filter((f) => f.file_type === 'FOLDER' && (!picked.size || picked.has(f.id))
-        && /^(tv( shows?)?|series|movies?|films?)$|podcast|music|audio ?books?/i.test(f.name.trim()))
+        && /^(tv( shows?)?|series|movies?|films?)$|podcast|audio ?books?/i.test(f.name.trim()))
         .map((f) => ({ id: f.id, name: f.name }));
       try { await scanProgress(scanLibs); } catch (e) { if (e.auth) throw e; }
     } catch (e) {
@@ -809,6 +856,7 @@
     el.player.hidden = view !== 'player';
     el.upcoming.hidden = view !== 'upcoming';
     el.home.hidden = view !== 'home';
+    if ($('#mini')) setTimeout(updateMini, 0);
     // Bottom tabs: hidden on sign-in and in the player (like Plex).
     const tabsOn = view !== 'login' && view !== 'player';
     el.tabs.hidden = !tabsOn; document.body.classList.toggle('has-tabs', tabsOn);
@@ -1310,15 +1358,18 @@
   let lostSet = (() => { try { return new Set(JSON.parse(store.get(KEY_LOST) || '[]')); } catch (e) { return new Set(); } })();
   function markLost(id) { lostSet.add(id); store.set(KEY_LOST, JSON.stringify([...lostSet].slice(-2000))); }
   const isLost = (id) => lostSet.has(id);
+  // The playlist is the folder the current track was started from, kept separately so music
+  // can carry on in the background while you browse other folders.
+  let playlist = [], playlistName = '', mini = false;
   function nextFile() {
-    const i = current ? files.indexOf(current) : -1;
+    const i = current ? playlist.indexOf(current) : -1;
     if (i < 0) return null;
     if (shuffleActive()) {
       const q = shuffleQueue.indexOf(current.id);
-      for (let k = q + 1; k > 0 && k < shuffleQueue.length; k++) { const f = files.find((x) => x.id === shuffleQueue[k]); if (f && !isLost(f.id)) return f; }
+      for (let k = q + 1; k > 0 && k < shuffleQueue.length; k++) { const f = playlist.find((x) => x.id === shuffleQueue[k]); if (f && !isLost(f.id)) return f; }
       return null;
     }
-    return files.slice(i + 1).find((f) => isPlayable(f) && !isLost(f.id)) || null;
+    return playlist.slice(i + 1).find((f) => isPlayable(f) && !isLost(f.id)) || null;
   }
 
   /* ---------- shuffle (audio) ---------- */
@@ -1348,7 +1399,7 @@
   let shuffleOn = store.get(KEY_SHUFFLE) === 'on', shuffleQueue = [];
   const shuffleActive = () => shuffleOn && current && current.file_type === 'AUDIO' && shuffleQueue.includes(current.id);
   function buildShuffle(firstId) {
-    const ids = files.filter((f) => f.file_type === 'AUDIO' && !isLost(f.id)).map((f) => f.id).filter((id) => id !== firstId);
+    const ids = playlist.filter((f) => f.file_type === 'AUDIO' && !isLost(f.id)).map((f) => f.id).filter((id) => id !== firstId);
     for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
     shuffleQueue = firstId != null ? [firstId, ...ids] : ids;
   }
@@ -1382,6 +1433,7 @@
     const tracks = files.filter((f) => f.file_type === 'AUDIO' && !isLost(f.id)); if (!tracks.length) return;
     const first = tracks[Math.floor(Math.random() * tracks.length)];
     shuffleOn = true; store.set(KEY_SHUFFLE, 'on');
+    playlist = files.slice(); playlistName = (stack[stack.length - 1] || {}).name || '';
     buildShuffle(first.id);
     openFile(first, { next: true });
   });
@@ -1389,17 +1441,21 @@
   let forcePlay = false; // playing on from the previous file: start even if Auto-start is off
   let playerFrom = 'browser'; // the screen Back returns to
   async function openFile(f, opts = {}) {
-    if (!playerOpen) playerFrom = opts.from || (!el.home.hidden ? 'home' : !el.upcoming.hidden ? 'upcoming' : 'browser');
+    const bg = mini && !!opts.next; // music playing on in the background: don't open the player
+    if (!playerOpen && !bg) playerFrom = opts.from || (!el.home.hidden ? 'home' : !el.upcoming.hidden ? 'upcoming' : 'browser');
+    if (!opts.next || !playlist.includes(f)) { playlist = files.slice(); playlistName = parseRelease(showFolderTitle() || '').title || (stack[stack.length - 1] || {}).name || ''; }
     current = f;
     recordHistory(f);
     lastSaveAt = 0; lastSavedSecs = -1;
     forcePlay = !!opts.next;
     // Moving on to the next file replaces the player entry, so Back still goes to the folder.
-    if (playerOpen) history.replaceState({ d: stack.length, p: 1 }, '');
-    else history.pushState({ d: stack.length, p: 1 }, '');
-    playerOpen = true;
-    show('player');
-    setTitle('');
+    if (!bg) {
+      if (playerOpen) history.replaceState({ d: stack.length, p: 1 }, '');
+      else history.pushState({ d: stack.length, p: 1 }, '');
+      playerOpen = true; mini = false;
+      show('player');
+      setTitle('');
+    }
     if (f.file_type === 'AUDIO' && shuffleOn && !shuffleQueue.includes(f.id)) buildShuffle(f.id);
     updateShuffleBtn();
     if (el.markplayed) el.markplayed.textContent = isPlayed(f.id) ? 'Mark unplayed' : 'Mark played';
@@ -1600,7 +1656,7 @@
       setStatus(`${why}. No other format is available for this file.`, 'bad');
     }
   }
-  el.video.addEventListener('error', () => { if (current && playerOpen) nextKind('Could not play this format'); });
+  el.video.addEventListener('error', () => { if (current && (playerOpen || mini)) nextKind('Could not play this format'); });
 
   // Bar under the video: watched part in white, buffered ranges in yellow, so the
   // yellow past the white edge is what's loaded ahead of the current position.
@@ -1660,7 +1716,7 @@
   });
 
   function saveNow(keepalive) {
-    if (!current || !playerOpen) return Promise.resolve();
+    if (!current || (!playerOpen && !mini)) return Promise.resolve();
     const t = el.video.currentTime;
     if (t < MIN_SAVE_SECONDS || Math.floor(t) === lastSavedSecs) return Promise.resolve();
     lastSaveAt = Date.now();
@@ -1971,6 +2027,8 @@
 
   async function closePlayer() {
     if (!playerOpen) return;
+    // Music (playing or paused) goes to the now-playing bar; only a finished track closes.
+    if (current && current.file_type === 'AUDIO' && el.video.currentSrc && !el.video.ended) { minimizePlayer(); return; }
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
     await saveNow(false);
     revokeLocal();
@@ -2046,6 +2104,7 @@
   });
 
   function logout(msg) {
+    if (mini) stopPlayback();
     token = null; store.del(KEY_TOKEN);
     if (playerOpen) { el.video.pause(); el.video.removeAttribute('src'); el.video.removeAttribute('poster'); el.video.load(); playerOpen = false; current = null; }
     stack = [{ id: 0, name: 'Files' }];
